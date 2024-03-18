@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.0/ref/settings/
 """
 
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -31,13 +32,13 @@ SECRET_KEY = os.environ["COSAP_DJANGO_SECRET"]
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get("COSAP_DJANGO_DEBUG") == "True"
 
-ALLOWED_HOSTS = ["localhost", os.environ.get("COSAP_DJANGO_HOST")]
+ALLOWED_HOSTS = ["localhost"] + json.loads(os.environ.get("COSAP_BIO_HOST", "[]"))
 
 CSRF_TRUSTED_ORIGINS = [os.environ.get("COSAP_CORS_ALLOWED_ORIGINS")]
 
-CORS_ALLOWED_ORIGINS = ["https://localhost:3000", os.environ.get("COSAP_BIO_HOST")]
-
-CORS_ALLOWED_ORIGINS = [os.environ.get("COSAP_BIO_HOST", "http://localhost:3000")]
+CORS_ALLOWED_ORIGINS = [
+    os.environ.get("COSAP_CORS_ALLOWED_ORIGINS", "http://localhost:3000")
+]
 CORS_ALLOW_HEADERS = [
     "authorization",
     "content-type",
@@ -63,6 +64,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "cosapweb.api",
     "django_drf_filepond",
+    "django_json_widget"
 ]
 
 MIDDLEWARE = [
@@ -119,6 +121,9 @@ DATABASES = {
         "PASSWORD": os.environ.get("COSAP_POSTGRES_PASSWORD", "postgres"),
         "HOST": "db",
         "PORT": "5432",
+        "TEST": {
+            "NAME": "postgres",
+        },
     }
 }
 
@@ -179,14 +184,18 @@ CELERY_TASK_ROUTES = {
         "exchange_type": "direct",
         "routing_key": "cosap_worker",
     },
-    "cosap_dna_pipeline_task": {
+    "dna_pipeline_task": {
+        "exchange": "cosap_worker",
+        "exchange_type": "direct",
+        "routing_key": "cosap_worker",
+    },
+    "annotation_task": {
         "exchange": "cosap_worker",
         "exchange_type": "direct",
         "routing_key": "cosap_worker",
     },
 }
-CELERY_ACCEPT_CONTENT = ["pickle", "json", "msgpack", "yaml"]
-CELERY_SEND_TASK = True
+CELERY_ACCEPT_CONTENT = ["json", "msgpack", "yaml"]
 
 sentry_sdk.init(
     dsn=os.environ.get("SENTRY_DSN"),
@@ -199,6 +208,28 @@ sentry_sdk.init(
     traces_sample_rate=1.0,
     # If you wish to associate users to errors (assuming you are using
     # django.contrib.auth) you may enable sending PII data.
-    send_default_pii=True
+    send_default_pii=True,
 )
 ignore_logger("django.security.DisallowedHost")
+
+
+# LOGGING = {
+#     "version": 1,
+#     "disable_existing_loggers": False,
+#     "handlers": {
+#         "console": {
+#             "class": "logging.StreamHandler",
+#         },
+#         "file": {
+#             "level": "DEBUG",
+#             "class": "logging.FileHandler",
+#             "filename": "log.django",
+#         },
+#     },
+#     "loggers": {
+#         "django": {
+#             "handlers": ["console", "file"],
+#             "level": os.getenv("DJANGO_LOG_LEVEL", "DEBUG"),
+#         },
+#     },
+# }

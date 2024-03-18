@@ -8,7 +8,13 @@ from django.dispatch import receiver
 from django_drf_filepond.models import TemporaryUpload, TemporaryUploadChunked
 from rest_framework.authtoken.models import Token
 
-from ..common.utils import get_project_dir, get_user_files_dir
+from .constants import FileExtensions, ProjectStatus
+from .helpers.model_helpers import get_updated_model_fields
+from .helpers.project_helpers import get_project_dir, project_files_ready
+from .helpers.task_helpers import (subbmit_cosap_parse_project_data,
+                                   submit_cosap_annotation_task,
+                                   submit_cosap_dna_task)
+from .helpers.user_helpers import get_user_files_dir
 from .models import Action, File, Project, Report
 
 
@@ -45,44 +51,28 @@ def auto_delete_project_dir_on_delete(sender, instance, **kwargs):
 
 @receiver(post_save, sender=File)
 def auto_extract_file_extension(sender, instance, created, **kwargs):
-    if not created:
-        return
-
     """
     Extracts file extension from file name.
     """
-    FILE_EXTENSIONS = {
-        "FQ": ["fastq", "fq"],
-        "FA": ["fa", "fasta"],
-        "SAM": ["sam"],
-        "BAM": ["bam"],
-        "CRAM": ["cram"],
-        "BED": ["bed", "bed6"],
-        "VCF": ["vcf"],
-        "TXT": ["txt", "tsv", "csv"],
-        "JSON": ["json"],
-        "GFF": ["gff", "gff3"],
-        "GTF": ["gtf"],
-        "WIG": ["wig", "bigwig"],
-        "BPK": ["bpk"],
-        "PDB": ["pdb"],
-        "CIF": ["cif"],
-        "BIB": ["bib"],
-        "SRA": ["sra"],
-        "MAF": ["maf"],
-    }
 
     if instance.name:
         path = PurePosixPath(instance.name)
+        # Extrant suffix and remove leading dot
         suffixes = path.suffixes
+        suffixes = [suffix[1:] for suffix in suffixes]
 
-        for file_type, extensions in FILE_EXTENSIONS.items():
+        extensions_dict = {
+            member.name: member.value for member in FileExtensions.__members__.values()
+        }
+        for file_type, extensions in extensions_dict.items():
             if len(set(extensions).intersection(set(suffixes))) > 0:
-                instance.file_type = file_type
+                found_type = file_type
+                break
             else:
-                instance.file_type = "UNKNOWN"
+                found_type = FileExtensions.UNKNOWN.value
 
-        instance.save()
+        # Update file object to prevent signal loop
+        File.objects.filter(id=instance.id).update(file_type=found_type)
 
 
 @receiver(post_save, sender=Project)
@@ -127,3 +117,43 @@ def save_tmp_upload(sender, instance, **kwargs):
     fl.name = upload_file_name
     fl.file = permanent_file_path
     fl.save()
+
+
+# Submit COSAP DNA job when project is created and parse project data when project is updated.
+@receiver(post_save, sender=Project)
+def submit_cosap_dna_job(sender, instance, created, **kwargs):
+
+    # Submit COSAP DNA job when project is created
+    if created:
+        if project_files_ready(instance.id):
+            submit_cosap_dna_task(instance.id)
+
+
+@receiver(post_save, sender=Project)
+def create_project_dir(sender, instance, created, **kwargs):
+    """
+    Creates project directory when a project is created.
+    """
+    if created:
+        project_dir = get_project_dir(instance.id)
+        if not os.path.isdir(project_dir):
+            os.makedirs(project_dir)
+
+@receiver(post_save, sender=Project)
+def create_project_summary(sender, instance, created, **kwargs):
+    """
+    Creates project summary when a project is created.
+    """
+    if created:
+        from .models import ProjectSummary
+        ProjectSummary.objects.create(project=instance)
+
+@receiver(post_save, sender=Project)
+def submit_cosap_parse_project_data_job(sender, instance, created, **kwargs):
+    """
+    Creates project directory when a project is created.
+    """
+    if not created:
+        updated_fields = get_updated_model_fields(Project, instance, ["status"])
+        if "status" in updated_fields and instance.status == ProjectStatus.PARSING.value:
+            subbmit_cosap_parse_project_data(instance.id)

@@ -58,8 +58,9 @@ class Project(models.Model):
     GERMLINE = "GM"
     PROJECT_TYPE_CHOICES = [(SOMATIC, "somatic"), (GERMLINE, "germline")]
 
-    COMPLETED = "CO"
-    IN_PROGRESS = "IP"
+    COMPLETED = "COMPLETED"
+    IN_PROGRESS = "IN_PROGRESS"
+    PARSING = "PARSING"
     PENDING = "PENDING"
     CANCELLED = "CANCELLED"
     FAILED = "FAILED"
@@ -69,15 +70,18 @@ class Project(models.Model):
         (IN_PROGRESS, "in_progress"),
         (CANCELLED, "cancelled"),
         (FAILED, "failed"),
+        (PARSING, "parsing"),
     ]
 
     user = models.ForeignKey(USER, null=True, on_delete=models.SET_NULL)
-    collaborators = models.ManyToManyField(USER, related_name="projects", blank=True, null=True)
+    collaborators = models.ManyToManyField(USER, related_name="projects", blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     project_type = models.CharField(choices=PROJECT_TYPE_CHOICES, max_length=256)
     name = models.CharField(max_length=256)
     status = models.CharField(choices=PROJECT_STATUS_CHOICES, max_length=256)
     progress = models.SmallIntegerField(default=0)
+    stdout = models.TextField(null=True, blank=True)
+    stderr = models.TextField(null=True, blank=True)
     algorithms = models.JSONField(default=dict)
     is_demo = models.BooleanField(default=False)
 
@@ -87,46 +91,59 @@ class Project(models.Model):
 
 class ProjectSummary(models.Model):
     project = models.ForeignKey(Project, on_delete=models.CASCADE)
-    mapped_reads = models.FloatField()
-    mean_coverage = models.FloatField()
-    number_of_variants = models.IntegerField()
-    number_of_significant_variants = models.IntegerField()
-    number_of_vus = models.IntegerField()
+    mapped_reads = models.FloatField(null=True, blank=True)
+    mean_coverage = models.FloatField(null=True, blank=True)
+    number_of_variants = models.IntegerField(null=True, blank=True)
+    number_of_significant_variants = models.IntegerField(null=True, blank=True)
+    number_of_vus = models.IntegerField(null=True, blank=True)
     msi_score = models.FloatField(null=True, blank=True)
     cnv_count = models.IntegerField(null=True, blank=True)
 
     def __str__(self) -> str:
-        return f"{self.project.name} - summary"
+        return f"{self.project.name} summary"
 
 
 class SNV(models.Model):
+    variant_id = models.CharField(max_length=256)
     location = models.CharField(max_length=256)
     ref = models.CharField(max_length=256)
     alt = models.CharField(max_length=256)
-    function = models.TextField(max_length=256, null=True, blank=True)
+    gene_id = models.CharField(max_length=256, null=True, blank=True)
     gene_symbol = models.CharField(max_length=256, null=True, blank=True)
+    function = models.TextField(max_length=256, null=True, blank=True)
     consequence = models.TextField(max_length=256, null=True, blank=True)
     coding_consequece = models.TextField(max_length=256, null=True, blank=True)
-    ens_gene = models.CharField(max_length=256, null=True, blank=True)
+    impact = models.TextField(max_length=256, null=True, blank=True)
     feature = models.TextField(max_length=256, null=True, blank=True)
+    feature_type = models.TextField(max_length=256, null=True, blank=True)
+    hgvsg = models.CharField(max_length=256, null=True, blank=True)
     hgvsc = models.CharField(max_length=256, null=True, blank=True)
-    classification = models.CharField(max_length=256, null=True, blank=True)
+    hgvsp = models.CharField(max_length=256, null=True, blank=True)
+    mane_select = models.CharField(max_length=256, null=True, blank=True)
+    intervar_classification = models.CharField(max_length=256, null=True, blank=True)
+    cancervar_classification = models.CharField(max_length=256, null=True, blank=True)
     gnomad_af = models.FloatField(null=True, blank=True)
     aa_change = models.TextField(max_length=256, null=True, blank=True)
-    rs_id = models.CharField(max_length=256, null=True, blank=True)
-    sift_score = models.FloatField(null=True, blank=True)
-    polyphen_score = models.FloatField(null=True, blank=True)
+    existing_variation = models.CharField(max_length=256, null=True, blank=True)
+    sift_score = models.CharField(max_length=256, null=True, blank=True)
+    polyphen_score = models.CharField(max_length=256, null=True, blank=True)
     interpro_domain = models.TextField(max_length=256, null=True, blank=True)
+    clinvar_classification = models.TextField(max_length=256, null=True, blank=True)
     clinical_significance = models.TextField(max_length=256, null=True, blank=True)
     cosmic_id = models.CharField(max_length=256, null=True, blank=True)
-    clinvar_classification = models.TextField(max_length=256, null=True, blank=True)
     evidence = models.TextField(max_length=256, null=True, blank=True)
-    orphanet_info = models.TextField(max_length=256, null=True, blank=True)
-    other_info = models.TextField(max_length=256, null=True, blank=True)
+    orpha_number = models.CharField(max_length=256, null=True, blank=True)
+    orpha_info = models.TextField(max_length=256, null=True, blank=True)
+    is_annotated = models.BooleanField(default=False)
 
     def __str__(self) -> str:
-        return f"{self.location} - {self.gene_symbol}"
+        return self.variant_id
 
+    def save(self, *args, **kwargs):
+        self.location = "_".join(
+            [self.variant_id.split("_")[0], str(self.variant_id.split("_")[1])]
+        )
+        super(SNV, self).save(*args, **kwargs)
 
 class ProjectSNVs(models.Model):
     project = models.ForeignKey(Project, null=True, on_delete=models.CASCADE)
@@ -139,7 +156,9 @@ class ProjectSNVs(models.Model):
 class ProjectSNVData(models.Model):
     project = models.ForeignKey(Project, null=True, on_delete=models.CASCADE)
     snv = models.ForeignKey(SNV, null=True, on_delete=models.SET_NULL)
-    allele_frequency = models.FloatField(default=0.43)
+    allele_frequency = models.FloatField(null=True, blank=True)
+    allele_depth = models.IntegerField(null=True, blank=True)
+    read_depth = models.IntegerField(null=True, blank=True)
 
     def __str__(self) -> str:
         return f"{self.project.id}_{self.project.name} - snv data"
@@ -192,6 +211,11 @@ class File(models.Model):
 
     def __str__(self):
         return f"{self.id}-{self.name}"
+
+    def save(self, *args, **kwargs):
+        if not self.name:
+            self.name = self.file.name
+        super(File, self).save(*args, **kwargs)
 
 
 class ProjectFiles(models.Model):

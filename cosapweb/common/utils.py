@@ -2,7 +2,9 @@ import os
 import re
 from datetime import datetime
 
+from celery.result import AsyncResult
 from django.conf import settings
+from django.db.models import Q
 
 
 def levenshtein(s1, s2):
@@ -53,59 +55,24 @@ def match_read_pairs(file_list: list) -> list[tuple]:
             read_2.append((file, file_name))
 
     if len(read_1) != len(read_2):
-        raise ValueError("Some pairs are missing.")
+        raise ValueError(f"Some pairs are missing. Current files are: {file_obj_names}")
 
     pair_list = list(zip(read_1, read_2))
 
     for pair in pair_list:
         if levenshtein(pair[0][1], pair[1][1]) != 1:
-            raise ValueError("Some pairs are not matching.")
+            raise ValueError(
+                f"Some pairs are not matching. Current files are: {file_obj_names}"
+            )
 
     pair_list = [(pair[0][0].file.path, pair[1][0].file.path) for pair in pair_list]
     if len(pair_list) == 0:
         raise ValueError(
-            "Fastq files cannot be paired. The filenames should be like: \
-                sample_1.fastq.gz, sample_2.fastq.gz or sample_R1.fastq.gz, sample_R2.fastq.gz"
+            f"Fastq files cannot be paired. The filenames should be like: \
+                sample_1.fastq.gz, sample_2.fastq.gz or sample_R1.fastq.gz, sample_R2.fastq.gz. Current files are: {file_obj_names}"
         )
 
     return pair_list
-
-
-def get_user_dir(user):
-    user_path = f"{user.id}_{user.email}"
-    return os.path.join(settings.MEDIA_ROOT, user_path)
-
-
-def get_user_files_dir(user):
-    user_path = get_user_dir(user)
-    user_files_path = os.path.join(user_path, "files")
-    os.makedirs(user_files_path, exist_ok=True)
-    return user_files_path
-
-
-def get_project_dir(project):
-    return os.path.join(get_user_dir(project.user), f"{project.id}_{project.name}")
-
-
-def convert_file_relative_path_to_absolute_path(file_path: str) -> str:
-    """
-    Converts relative path to absolute path.
-    """
-    return os.path.join(settings.MEDIA_ROOT, file_path)
-
-
-def wait_file_update_complete(file_path: str, timeout: int = 600) -> bool:
-    """
-    Waits for file to be updated.
-    """
-    import time
-
-    start_time = time.time()
-    while time.time() - start_time < timeout:
-        if time.time() - os.path.getmtime(file_path) > 1:
-            return
-        time.sleep(0.1)
-    raise Exception("File upload not complete")
 
 
 def get_relative_to_media_root(path):
@@ -152,9 +119,9 @@ def create_chonky_filemap(dir, project_name):
                 if parent_id not in file_map:
                     file_map[parent_id] = {
                         "id": parent_id,
-                        "name": root_folder_name
-                        if parent_id == root_dir_id
-                        else entry.name,
+                        "name": (
+                            root_folder_name if parent_id == root_dir_id else entry.name
+                        ),
                         "isDir": True,
                         "childrenIds": [file_id],
                         "path": rel_path,
@@ -168,9 +135,9 @@ def create_chonky_filemap(dir, project_name):
                 if parent_id not in file_map:
                     file_map[parent_id] = {
                         "id": parent_id,
-                        "name": root_folder_name
-                        if parent_id == root_dir_id
-                        else entry.name,
+                        "name": (
+                            root_folder_name if parent_id == root_dir_id else entry.name
+                        ),
                         "isDir": True,
                         "childrenIds": [file_id],
                         "path": get_relative_to_media_root(dir_path),
@@ -200,3 +167,10 @@ def create_chonky_filemap(dir, project_name):
         pass
 
     return {"root_folder_id": root_dir_id, "file_map": file_map}
+
+
+def convert_file_relative_path_to_absolute_path(file_path: str) -> str:
+    """
+    Converts relative path to absolute path.
+    """
+    return os.path.join(settings.MEDIA_ROOT, file_path)

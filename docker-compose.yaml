@@ -16,11 +16,11 @@ services:
       ]
     env_file:
       - .env
-    working_dir: /
+    working_dir: /webapi/data
   db:
     image: postgres
     volumes:
-      - ./data/db:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
     environment:
       - POSTGRES_NAME=${COSAP_POSTGRES_NAME}
       - POSTGRES_USER=${COSAP_POSTGRES_USER}
@@ -46,6 +46,18 @@ services:
     depends_on:
       - db
     restart: unless-stopped
+  celeryworker:
+    build: .
+    command: celery -A cosapweb worker -l INFO
+    volumes:
+      - .:/webapi
+    env_file:
+      - .env
+    depends_on:
+      - db
+      - redis
+      - rabbitmq
+    restart: unless-stopped
   redis:
     image: redis
     expose:
@@ -61,3 +73,5 @@ services:
       - RABBITMQ_DEFAULT_VHOST=vhost
       - RABBITMQ_DEFAULT_USER=guest
       - RABBITMQ_DEFAULT_PASS=guest
+volumes:
+  postgres-data:

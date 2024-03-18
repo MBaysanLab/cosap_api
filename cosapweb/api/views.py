@@ -4,10 +4,10 @@ import mimetypes
 import os
 import re
 import tempfile
-from multiprocessing.pool import ThreadPool
 from pathlib import Path
 from urllib import request
 from wsgiref.util import FileWrapper
+import zipfile
 
 import pysam
 from django.contrib.auth import get_user_model
@@ -16,17 +16,17 @@ from django.db.models import Q
 from django.db.models.query import QuerySet
 from django.forms.models import model_to_dict
 from django.http import Http404, HttpResponse, StreamingHttpResponse
+from django.shortcuts import get_object_or_404
 from django_drf_filepond.parsers import PlainTextParser, UploadChunkParser
 from django_drf_filepond.renderers import PlainTextRenderer
 from django_drf_filepond.views import PatchView, ProcessView
 from rest_framework import mixins, permissions, status, views, viewsets
 from rest_framework.authtoken.models import Token
 from rest_framework.authtoken.views import ObtainAuthToken
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view
 from rest_framework.parsers import MultiPartParser
 from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
-from rest_framework.decorators import api_view
 
 from cosapweb.api import serializers
 from cosapweb.api.models import (SNV, Action, File, Project, ProjectFiles,
@@ -35,9 +35,8 @@ from cosapweb.api.models import (SNV, Action, File, Project, ProjectFiles,
 from cosapweb.api.permissions import IsOwnerOrDoesNotExist, OnlyAdminToList
 
 from ..common.utils import (convert_file_relative_path_to_absolute_path,
-                            create_chonky_filemap, get_project_dir,
-                            get_user_dir)
-from .celery_handlers import submit_cosap_dna_job
+                            create_chonky_filemap)
+from .helpers.project_helpers import get_project_dir
 
 USER = get_user_model()
 
@@ -165,7 +164,10 @@ class ProjectViewSet(viewsets.ModelViewSet):
             user = self.request.user
             if user.is_superuser:
                 return queryset
-            queryset = queryset.filter(Q(user=user) | Q(collaborators=user) | Q(is_demo=True))
+            queryset = queryset.filter(
+                Q(user=user) | Q(collaborators=user) | Q(is_demo=True)
+            )
+
         return queryset
 
     def create(self, request, *args, **kwargs):
@@ -201,20 +203,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
         project_files.save()
 
-        # Create project directory under user directory
-        user_dir = get_user_dir(user)
-        project_dir = os.path.join(user_dir, f"{new_project.id}_{new_project.name}")
-        os.makedirs(project_dir)
-        try:
-            pool = ThreadPool(processes=1)
-            async_result = pool.apply_async(submit_cosap_dna_job, (new_project.id,))
-            task_id = async_result.get()
-            ProjectTask.objects.create(project=new_project, task_id=task_id)
-
-        except Exception as e:
-            new_project.status = "FAILED"
-            new_project.save()
-
+        new_project.save()
         return HttpResponse(status=status.HTTP_201_CREATED)
 
     def retrieve(self, request, pk):
@@ -229,46 +218,38 @@ class ProjectViewSet(viewsets.ModelViewSet):
             "time": project.created_at,
         }
 
-        try:
-            results = ProjectSummary.objects.get(project=project)
-        except Exception as e:
-            results = None
+        summary = ProjectSummary.objects.get(project=project)
 
         return Response(
             {
                 "metadata": project_metadata,
-                "summary": model_to_dict(results) if results else None,
+                "summary": model_to_dict(summary) if summary else None,
             },
             status=status.HTTP_200_OK,
         )
 
     @action(detail=True, methods=["post"])
     def rerun_project(self, request, pk=None):
-        # Allow only user that created the project to rerun it
-        if request.user != Project.objects.get(id=pk).user:
+        # Allow only superuser user that created or the project to rerun it
+        if (
+            request.user != Project.objects.get(id=pk).user
+            and not request.user.is_superuser
+        ):
             return HttpResponse(status=status.HTTP_401_UNAUTHORIZED)
 
         project = Project.objects.get(id=pk)
         project.status = "PENDING"
         project.save()
 
-        try:
-            pool = ThreadPool(processes=1)
-            async_result = pool.apply_async(submit_cosap_dna_job, (project.id,))
-            task_id = async_result.get()
-            ProjectTask.objects.create(project=project, task_id=task_id)
-
-        except Exception as e:
-            print(f"Error submitting job: {e}")
-            project.status = "FAILED"
-            project.save()
-
         return HttpResponse(status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"])
     def delete_project(self, request, pk=None):
-        # Allow only user that created the project to delete it
-        if request.user != Project.objects.get(id=pk).user:
+        # Allow only user that created the project to delete it
+        if (
+            request.user != Project.objects.get(id=pk).user
+            and not request.user.is_superuser
+        ):
             return HttpResponse(status=status.HTTP_401_UNAUTHORIZED)
         project = Project.objects.get(id=pk)
         project.delete()
@@ -294,6 +275,11 @@ class ProjectSNVViewset(viewsets.ViewSet):
 
             all_variants.append(variant_dict)
 
+        # Convert out of range float values to string
+        for variant in all_variants:
+            for key, value in variant.items():
+                if isinstance(value, float) and not (-3.4e+38 < value < 3.4e+38):
+                    variant[key] = str(value)
         return Response(all_variants)
 
 
@@ -387,25 +373,32 @@ class FileViewSet(ProcessView, PatchView, viewsets.ViewSet):
             if not project:
                 return Response(status=status.HTTP_404_NOT_FOUND)
 
-            project_dir = get_project_dir(project)
+            project_dir = get_project_dir(project_id)
             files = create_chonky_filemap(project_dir, project.name)
             return Response(files)
 
         if sample_type:
-            files = File.objects.filter((Q(user=request.user) | Q(is_demo=True)), Q(sample_type=sample_type))
+            files = File.objects.filter(
+                (Q(user=request.user) | Q(is_demo=True)), Q(sample_type=sample_type)
+            )
             files = {
                 files[i].uuid: f"{i+1} - {files[i].name}" for i in range(len(files))
             }
             return Response(files)
 
         if file_type:
+            files = File.objects.filter(
+                (Q(user=request.user) | Q(is_demo=True)), Q(file_type=file_type)
+            )
             files = {
-                file.uuid: f"{file.project.name} - {file.name}"
-                for file in File.objects.filter((Q(user=request.user) | Q(is_demo=True)), Q(file_type=file_type))
+                files[i].uuid: f"{i+1} - {files[i].name}" for i in range(len(files))
             }
             return Response(files)
 
-        files = [file.filename for file in File.objects.filter(Q(user=request.user) | Q(is_demo=True))]
+        files = [
+            file.filename
+            for file in File.objects.filter(Q(user=request.user) | Q(is_demo=True))
+        ]
         return Response(files)
 
     def create(self, request, *args, **kwargs):
@@ -435,6 +428,24 @@ class FileViewSet(ProcessView, PatchView, viewsets.ViewSet):
 
         if not os.path.exists(file_path):
             raise Http404
+        
+        # If the requested path is a directory, create a zip file and return it
+        if os.path.isdir(file_path):
+            with tempfile.NamedTemporaryFile(suffix=".zip", delete=True) as temp_zip:
+                with zipfile.ZipFile(temp_zip, "w", zipfile.ZIP_DEFLATED) as zipf:
+                    for root, dirs, files in os.walk(file_path):
+                        for file in files:
+                            zipf.write(os.path.join(root, file), os.path.relpath(os.path.join(root, file), file_path))
+
+                response = StreamingHttpResponse(
+                    FileWrapper(
+                        open(temp_zip.name, "rb"),
+                    ),
+                    content_type="application/zip",
+                )
+                response["Content-Length"] = os.path.getsize(temp_zip.name)
+                response["Content-Disposition"] = f"attachment; filename={os.path.basename(file_path)}.zip"
+                return response
 
         filename = os.path.basename(file_path)
         response = StreamingHttpResponse(

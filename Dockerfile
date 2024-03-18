@@ -30,6 +30,6 @@ RUN conda init bash
 
 # Install web API requirements
 RUN pip install Django==4.0 djangorestframework django-filter django-countries psycopg2-binary \
-    django-cors-headers django-drf-filepond "celery[redis]" pysam sentry-sdk
+    django-cors-headers django-drf-filepond "celery[redis]" pysam sentry-sdk django-json-widget
 
 WORKDIR /webapi

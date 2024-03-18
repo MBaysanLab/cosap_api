@@ -179,3 +179,7 @@ migrations/
 # filepond files
 filepond_temp_files/
 static/
+
+# Django log files
+*.log
+log.django
