@@ -16,6 +16,7 @@ from ..models import (
 from .file_helpers import wait_file_update_complete
 from .user_helpers import get_user_dir
 from .variant_helpers import create_snv
+import warnings
 
 
 def set_project_status(project_id, status):
@@ -27,9 +28,20 @@ def set_project_status(project_id, status):
         status=status,
     )
 
+def set_project_stderr(project_id, stderr):
+    """
+    Sets project stderr.
+    """
+
+    Project.objects.filter(id=project_id).update(
+        stderr=stderr,
+    )
 
 def get_project_dir(project_id):
-    project = Project.objects.get(id=project_id)
+    try:
+        project = Project.objects.get(id=project_id)
+    except Project.DoesNotExist:
+        raise Exception("Project does not exist.")
     return os.path.join(get_user_dir(project.user), f"{project.id}_{project.name}")
 
 
@@ -148,10 +160,10 @@ def project_files_ready(project_id):
     try:
         project_files = ProjectFiles.objects.get(project=project)
     except ProjectFiles.DoesNotExist:
+        warnings.warn("The project does not have any files.")
         return False
-
-    for file in project_files.files.all():
-        return wait_file_update_complete(file.file.path)
+    
+    return all([wait_file_update_complete(file.file.path) for file in project_files.files.all()])
 
 
 def update_project_summary(project_id, qc_results=None, msi_score=None):

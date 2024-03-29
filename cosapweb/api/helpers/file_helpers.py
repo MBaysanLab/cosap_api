@@ -1,9 +1,9 @@
 import os
 
 from django.conf import settings
+import warnings
 
-
-def wait_file_update_complete(file_path: str, timeout: int = 600) -> bool:
+def wait_file_update_complete(file_path: str, timeout: int = 1000) -> bool:
     """
     Waits for file to be updated.
     """

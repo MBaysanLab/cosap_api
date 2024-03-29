@@ -2,10 +2,10 @@ from ...common.utils import match_read_pairs
 from ..celery_handlers.tasks import (cosap_annotation_task, cosap_dna_task,
                                      cosap_parse_project_data_task)
 from ..constants import (CosapDnaTaskInputs, FileExtensions, ProjectTypes,
-                         Sampletypes)
+                         Sampletypes, ProjectStatus)
 from ..models import Project, ProjectFiles
 from .project_helpers import (get_project_algorithms, get_project_dir,
-                              get_project_files, get_project_type)
+                              get_project_files, get_project_type, set_project_status, set_project_stderr)
 
 
 def submit_cosap_dna_task(project_id: int):
@@ -19,10 +19,19 @@ def submit_cosap_dna_task(project_id: int):
         project_id, file_type=FileExtensions.BED.value[0]
     ).first()
 
-    normal_pairs = (
-        match_read_pairs([file for file in normal_files])[0] if normal_files else None
-    )
-    tumor_pairs = match_read_pairs([file for file in tumor_files])
+
+    try:
+        normal_pairs = (
+            match_read_pairs([file for file in normal_files])[0] if normal_files else None
+        )
+    except Exception as e:
+        set_project_stderr(project_id, e)
+    
+    try:
+        tumor_pairs = match_read_pairs([file for file in tumor_files])
+    except Exception as e:
+        set_project_stderr(project_id, e)
+        
 
     algorithms = get_project_algorithms(project_id)
     workdir = get_project_dir(project_id)
@@ -47,6 +56,8 @@ def submit_cosap_dna_task(project_id: int):
 
     results = cosap_dna_task(project_id, **dna_task_input)
 
+    # Set project status to running
+    set_project_status(project_id, ProjectStatus.RUNNING.value)
     return results
 
 

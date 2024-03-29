@@ -3,7 +3,7 @@ import shutil
 from pathlib import PurePosixPath
 
 from django.conf import settings
-from django.db.models.signals import post_delete, post_save
+from django.db.models.signals import post_delete, post_save, pre_delete
 from django.dispatch import receiver
 from django_drf_filepond.models import TemporaryUpload, TemporaryUploadChunked
 from rest_framework.authtoken.models import Token
@@ -38,13 +38,13 @@ def auto_delete_file_on_delete(sender, instance, **kwargs):
             os.remove(instance.file.path)
 
 
-@receiver(post_delete, sender=Project)
+@receiver(pre_delete, sender=Project)
 def auto_delete_project_dir_on_delete(sender, instance, **kwargs):
     """
     Deletes project directory from filesystem
     when corresponding `Project` object is deleted.
     """
-    project_dir = get_project_dir(instance)
+    project_dir = get_project_dir(instance.id)
     if os.path.isdir(project_dir):
         shutil.rmtree(project_dir)
 
@@ -116,18 +116,8 @@ def save_tmp_upload(sender, instance, **kwargs):
 
     fl.name = upload_file_name
     fl.file = permanent_file_path
+    fl.is_draft = False
     fl.save()
-
-
-# Submit COSAP DNA job when project is created and parse project data when project is updated.
-@receiver(post_save, sender=Project)
-def submit_cosap_dna_job(sender, instance, created, **kwargs):
-
-    # Submit COSAP DNA job when project is created
-    if created:
-        if project_files_ready(instance.id):
-            submit_cosap_dna_task(instance.id)
-
 
 @receiver(post_save, sender=Project)
 def create_project_dir(sender, instance, created, **kwargs):
@@ -148,6 +138,20 @@ def create_project_summary(sender, instance, created, **kwargs):
         from .models import ProjectSummary
         ProjectSummary.objects.create(project=instance)
 
+
+# Submit COSAP DNA job when project is created and parse project data when project is updated.
+@receiver(post_save, sender=Project)
+def submit_cosap_dna_job(sender, instance, created, **kwargs):
+    # Submit COSAP DNA job when project is created
+
+    if instance.is_draft:
+        return
+    
+    if created:
+        if project_files_ready(instance.id):
+            submit_cosap_dna_task(instance.id)
+
+
 @receiver(post_save, sender=Project)
 def submit_cosap_parse_project_data_job(sender, instance, created, **kwargs):
     """
@@ -157,3 +161,5 @@ def submit_cosap_parse_project_data_job(sender, instance, created, **kwargs):
         updated_fields = get_updated_model_fields(Project, instance, ["status"])
         if "status" in updated_fields and instance.status == ProjectStatus.PARSING.value:
             subbmit_cosap_parse_project_data(instance.id)
+        elif "status" in updated_fields and instance.status == ProjectStatus.PENDING.value:
+            submit_cosap_dna_task(instance.id)

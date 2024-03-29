@@ -37,6 +37,7 @@ from cosapweb.api.permissions import IsOwnerOrDoesNotExist, OnlyAdminToList
 from ..common.utils import (convert_file_relative_path_to_absolute_path,
                             create_chonky_filemap)
 from .helpers.project_helpers import get_project_dir
+from .constants import ProjectStatus
 
 USER = get_user_model()
 
@@ -180,7 +181,8 @@ class ProjectViewSet(viewsets.ModelViewSet):
             project_type=project_type,
             name=name,
             algorithms=algorithms,
-            status="PENDING",
+            status=ProjectStatus.PENDING.value,
+            is_draft=True,
         )
 
         normal_file_ids = json.loads(request.POST.get("normal_files", "[]"))
@@ -203,7 +205,9 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
         project_files.save()
 
+        new_project.is_draft = False
         new_project.save()
+
         return HttpResponse(status=status.HTTP_201_CREATED)
 
     def retrieve(self, request, pk):
@@ -238,7 +242,12 @@ class ProjectViewSet(viewsets.ModelViewSet):
             return HttpResponse(status=status.HTTP_401_UNAUTHORIZED)
 
         project = Project.objects.get(id=pk)
-        project.status = "PENDING"
+
+        # If the project is already running, skip rerunning
+        if project.status == ProjectStatus.RUNNING.value:
+            return HttpResponse(status=status.HTTP_200_OK)
+        
+        project.status = ProjectStatus.PENDING.value
         project.save()
 
         return HttpResponse(status=status.HTTP_200_OK)
@@ -251,8 +260,10 @@ class ProjectViewSet(viewsets.ModelViewSet):
             and not request.user.is_superuser
         ):
             return HttpResponse(status=status.HTTP_401_UNAUTHORIZED)
-        project = Project.objects.get(id=pk)
+        
+        project = get_object_or_404(Project, pk=pk)
         project.delete()
+
         return HttpResponse(status=status.HTTP_200_OK)
 
 
@@ -270,6 +281,16 @@ class ProjectSNVViewset(viewsets.ViewSet):
                 variant_dict["af"] = ProjectSNVData.objects.get(
                     project=project, snv=snv
                 ).allele_frequency
+                variant_dict["ad"] = ProjectSNVData.objects.get(
+                    project=project, snv=snv
+                ).allele_depth
+
+                # Internal variant frequency is the number of projects that have the variant over the total number of projects
+                internal_freq = ProjectSNVData.objects.filter(
+                    snv=snv
+                ).count() / Project.objects.count()
+                variant_dict["user_case_frequency"] = f"{internal_freq:.2f}"
+
             except Exception as e:
                 variant_dict["af"] = -1
 
@@ -418,7 +439,7 @@ class FileViewSet(ProcessView, PatchView, viewsets.ViewSet):
                 temp_id = response.data
                 sample_type = request.POST.get("sample_type")
                 f = File.objects.create(
-                    user=request.user, uuid=temp_id, sample_type=sample_type
+                    user=request.user, uuid=temp_id, sample_type=sample_type, is_draft=True
                 )
             return response
 

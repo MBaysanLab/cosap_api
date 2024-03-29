@@ -54,8 +54,8 @@ USER = get_user_model()
 
 class Project(models.Model):
 
-    SOMATIC = "SM"
-    GERMLINE = "GM"
+    SOMATIC = "SOMATIC"
+    GERMLINE = "GERMLINE"
     PROJECT_TYPE_CHOICES = [(SOMATIC, "somatic"), (GERMLINE, "germline")]
 
     COMPLETED = "COMPLETED"
@@ -84,6 +84,7 @@ class Project(models.Model):
     stderr = models.TextField(null=True, blank=True)
     algorithms = models.JSONField(default=dict)
     is_demo = models.BooleanField(default=False)
+    is_draft = models.BooleanField(default=False)
 
     def __str__(self):
         return f"{self.id} - {self.name}"
@@ -208,6 +209,7 @@ class File(models.Model):
     )
     file = models.FileField(upload_to=user_directory_path)
     is_demo = models.BooleanField(default=False)
+    is_draft = models.BooleanField(default=False)
 
     def __str__(self):
         return f"{self.id}-{self.name}"
