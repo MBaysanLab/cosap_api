@@ -26,11 +26,17 @@ def submit_cosap_dna_task(project_id: int):
         )
     except Exception as e:
         set_project_stderr(project_id, e)
+        # Set project status to error
+        set_project_status(project_id, ProjectStatus.FAILED.value)
+        return
     
     try:
         tumor_pairs = match_read_pairs([file for file in tumor_files])
     except Exception as e:
         set_project_stderr(project_id, e)
+        # Set project status to error
+        set_project_status(project_id, ProjectStatus.FAILED.value)
+        return
         
 
     algorithms = get_project_algorithms(project_id)

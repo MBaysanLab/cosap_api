@@ -34,7 +34,7 @@ DEBUG = os.environ.get("COSAP_DJANGO_DEBUG") == "True"
 
 ALLOWED_HOSTS = ["localhost"] + json.loads(os.environ.get("COSAP_BIO_HOST", "[]"))
 
-CSRF_TRUSTED_ORIGINS = [os.environ.get("COSAP_CORS_ALLOWED_ORIGINS")]
+CSRF_TRUSTED_ORIGINS = [os.environ.get("COSAP_CORS_TRUSTED_ORIGINS")]
 
 CORS_ALLOWED_ORIGINS = [
     os.environ.get("COSAP_CORS_ALLOWED_ORIGINS", "http://localhost:3000")
@@ -169,6 +169,7 @@ DJANGO_DRF_FILEPOND_FILE_STORE_PATH = BASE_DIR
 # https://docs.djangoproject.com/en/4.0/howto/static-files/
 
 STATIC_URL = "static/"
+STATIC_ROOT = "static/"
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.0/ref/settings/#default-auto-field

@@ -59,7 +59,7 @@ class Project(models.Model):
     PROJECT_TYPE_CHOICES = [(SOMATIC, "somatic"), (GERMLINE, "germline")]
 
     COMPLETED = "COMPLETED"
-    IN_PROGRESS = "IN_PROGRESS"
+    RUNNING = "RUNNING"
     PARSING = "PARSING"
     PENDING = "PENDING"
     CANCELLED = "CANCELLED"
@@ -67,7 +67,7 @@ class Project(models.Model):
     PROJECT_STATUS_CHOICES = [
         (PENDING, "pending"),
         (COMPLETED, "completed"),
-        (IN_PROGRESS, "in_progress"),
+        (RUNNING, "running"),
         (CANCELLED, "cancelled"),
         (FAILED, "failed"),
         (PARSING, "parsing"),
@@ -207,7 +207,7 @@ class File(models.Model):
     sample_type = models.CharField(
         choices=SAMPLE_TYPES, null=True, blank=True, max_length=256
     )
-    file = models.FileField(upload_to=user_directory_path)
+    file = models.FileField(upload_to=user_directory_path, max_length=256)
     is_demo = models.BooleanField(default=False)
     is_draft = models.BooleanField(default=False)
 

@@ -57,8 +57,8 @@ class ProjectAlgorithmKeys(Enum):
 
 
 class ProjectTypes(Enum):
-    SM = "SM"
-    GM = "GM"
+    SM = "SOMATIC"
+    GM = "GERMLINE"
     UNKNOWN = "UNKNOWN"
 
 

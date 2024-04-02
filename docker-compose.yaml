@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   cosap:
-    image: itubioinformatics/cosap
+    image: itubioinformatics/cosap:latest
     volumes:
       - ./data:/webapi/data/
       - ${COSAP_HG38_BUNDLE}:/cosap_data
