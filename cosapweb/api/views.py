@@ -300,7 +300,7 @@ class ProjectSNVViewset(viewsets.ViewSet):
                 variant_dict["user_case_frequency"] = f"{internal_freq:.2f}"
 
             except Exception as e:
-                variant_dict["af"] = -1
+                continue
 
             all_variants.append(variant_dict)
 

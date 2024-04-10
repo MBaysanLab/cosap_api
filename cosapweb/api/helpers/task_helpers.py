@@ -13,7 +13,7 @@ def submit_cosap_dna_task(project_id: int):
     Takes a Project object and submits a COSAP DNA pipeline job to Celery.
     """
 
-    project_type = get_project_type(project_id).lower()
+    project_type = get_project_type(project_id)
     normal_files = get_project_files(project_id, sample_type=Sampletypes.NORMAL.value)
     tumor_files = get_project_files(project_id, sample_type=Sampletypes.TUMOR.value)
     bed_file = get_project_files(
