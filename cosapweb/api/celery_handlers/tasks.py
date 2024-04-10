@@ -2,8 +2,14 @@ import os
 
 from ...celery import celery_app
 from ..constants import COSAPTasks
-from .callbacks import (on_annotation_task_success,
-                        on_dna_pipeline_task_complete, on_parse_success)
+from .callbacks import (
+    on_annotation_task_success,
+    on_annotation_task_failure,
+    on_dna_pipeline_task_failure,
+    on_dna_pipeline_task_success,
+    on_parse_task_success,
+    on_parse_task_failure,
+)
 
 
 def cosap_dna_task(project_id, **kwargs):
@@ -12,8 +18,8 @@ def cosap_dna_task(project_id, **kwargs):
     task = celery_app.send_task(
         COSAPTasks.DNA_PIPELINE_TASK.value,
         kwargs=kwargs,
-        link=on_dna_pipeline_task_complete.s(project_id=project_id),
-        link_error=on_dna_pipeline_task_complete.s(project_id=project_id),
+        link=on_dna_pipeline_task_success.s(project_id=project_id),
+        link_error=on_dna_pipeline_task_failure.s(project_id=project_id),
     )
     return task
 
@@ -25,7 +31,8 @@ def cosap_parse_project_data_task(path, project_id):
     task = celery_app.send_task(
         COSAPTasks.PARSE_PROJECT_RESULTS.value,
         args=[path],
-        link=on_parse_success.s(project_id=project_id),
+        link=on_parse_task_success.s(project_id=project_id),
+        link_error=on_parse_task_failure.s(project_id=project_id),
     )
     return task
 
@@ -38,5 +45,6 @@ def cosap_annotation_task(variant_list: list, workdir: str, project_id: int = No
         COSAPTasks.ANNOTATION_TASK.value,
         args=[variant_list, workdir],
         link=on_annotation_task_success.s(project_id=project_id),
+        link_error=on_annotation_task_failure.s(project_id=project_id),
     )
     return task

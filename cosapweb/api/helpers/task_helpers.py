@@ -13,6 +13,7 @@ def submit_cosap_dna_task(project_id: int):
     Takes a Project object and submits a COSAP DNA pipeline job to Celery.
     """
 
+    project_type = get_project_type(project_id).lower()
     normal_files = get_project_files(project_id, sample_type=Sampletypes.NORMAL.value)
     tumor_files = get_project_files(project_id, sample_type=Sampletypes.TUMOR.value)
     bed_file = get_project_files(
@@ -30,26 +31,24 @@ def submit_cosap_dna_task(project_id: int):
         set_project_status(project_id, ProjectStatus.FAILED.value)
         return
     
-    try:
-        tumor_pairs = match_read_pairs([file for file in tumor_files])
-    except Exception as e:
-        set_project_stderr(project_id, e)
-        # Set project status to error
-        set_project_status(project_id, ProjectStatus.FAILED.value)
-        return
-        
+    if project_type == ProjectTypes.SOMATIC.value:
+        try:
+            tumor_pairs = match_read_pairs([file for file in tumor_files])
+        except Exception as e:
+            set_project_stderr(project_id, e)
+            # Set project status to error
+            set_project_status(project_id, ProjectStatus.FAILED.value)
+            return
+            
 
     algorithms = get_project_algorithms(project_id)
     workdir = get_project_dir(project_id)
-    project_type = get_project_type(project_id)
 
     dna_task_input = {
-        CosapDnaTaskInputs.ANALYSIS_TYPE.value: (
-            "somatic" if project_type == ProjectTypes.SM.value else "germline"
-        ),
+        CosapDnaTaskInputs.ANALYSIS_TYPE.value: project_type,
         CosapDnaTaskInputs.WORKDIR.value: workdir,
         CosapDnaTaskInputs.NORMAL_SAMPLE.value: normal_pairs,
-        CosapDnaTaskInputs.TUMOR_SAMPLES.value: tumor_pairs,
+        CosapDnaTaskInputs.TUMOR_SAMPLES.value: tumor_pairs if project_type == ProjectTypes.SOMATIC.value else None,
         CosapDnaTaskInputs.BED_FILE.value: bed_file,
         CosapDnaTaskInputs.MAPPERS.value: algorithms[CosapDnaTaskInputs.MAPPERS.value],
         CosapDnaTaskInputs.VARIANT_CALLERS.value: algorithms[

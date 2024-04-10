@@ -50,6 +50,8 @@ class COSAPTasks(Enum):
 
 
 class ProjectAlgorithmKeys(Enum):
+
+    # JS naming convention is used since the keys are used in the frontend
     ALIGNER = "aligner"
     VARIANT_CALLER = "variantCaller"
     VARIANT_ANNOTATOR = "variantAnnotator"
@@ -57,8 +59,9 @@ class ProjectAlgorithmKeys(Enum):
 
 
 class ProjectTypes(Enum):
-    SM = "SOMATIC"
-    GM = "GERMLINE"
+    SOMATIC = "SOMATIC"
+    GERMLINE = "GERMLINE"
+    COMPARATIVE = "COMPARATIVE"
     UNKNOWN = "UNKNOWN"
 
 
@@ -92,3 +95,25 @@ class VCFHeaders(Enum):
     INFO = "INFO"
     FORMAT = "FORMAT"
     SAMPLE = "SAMPLE"
+
+class ProjectTypeAlgorithms(Enum):
+    ProjectTypes.SOMATIC.value = {
+         ProjectAlgorithmKeys.ALIGNER: [
+            "BWA2"
+        ],
+        ProjectAlgorithmKeys.VARIANT_CALLER: [
+            "Mutect2"
+        ],
+        ProjectAlgorithmKeys.VARIANT_ANNOTATOR: []
+    }
+    ProjectTypes.GERMLINE.value = {
+        ProjectAlgorithmKeys.ALIGNER: [
+            "BWA2"
+        ],
+        ProjectAlgorithmKeys.VARIANT_CALLER: [
+            "HaplotypeCaller"
+        ],
+        ProjectAlgorithmKeys.VARIANT_ANNOTATOR: []
+    }
+class AdminConstants(Enum):
+    WORKDIR = "admin_workdir"

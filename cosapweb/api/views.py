@@ -37,7 +37,7 @@ from cosapweb.api.permissions import IsOwnerOrDoesNotExist, OnlyAdminToList
 from ..common.utils import (convert_file_relative_path_to_absolute_path,
                             create_chonky_filemap)
 from .helpers.project_helpers import get_project_dir
-from .constants import ProjectStatus
+from .constants import ProjectStatus, ProjectTypeAlgorithms, ProjectTypes
 
 USER = get_user_model()
 
@@ -175,7 +175,15 @@ class ProjectViewSet(viewsets.ModelViewSet):
         user = request.user
         project_type = request.POST.get("project_type")
         name = request.POST.get("name")
-        algorithms = json.loads(request.POST.get("algorithms"))
+        
+        # If project type is somatic or germline set predifined algorithms
+        if project_type == ProjectTypes.SOMATIC.value:
+            algorithms = ProjectTypeAlgorithms[ProjectTypes.SOMATIC.value].value
+        elif project_type == ProjectTypes.GERMLINE.value:
+            algorithms = ProjectTypeAlgorithms[ProjectTypes.GERMLINE.value].value
+        else:
+            algorithms = json.loads(request.POST.get("algorithms", "{}"))
+        
         new_project = Project.objects.create(
             user=user,
             project_type=project_type,
