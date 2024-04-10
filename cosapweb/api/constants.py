@@ -97,7 +97,7 @@ class VCFHeaders(Enum):
     SAMPLE = "SAMPLE"
 
 class ProjectTypeAlgorithms(Enum):
-    ProjectTypes.SOMATIC.value = {
+    SOMATIC = {
          ProjectAlgorithmKeys.ALIGNER: [
             "BWA2"
         ],
@@ -106,7 +106,7 @@ class ProjectTypeAlgorithms(Enum):
         ],
         ProjectAlgorithmKeys.VARIANT_ANNOTATOR: []
     }
-    ProjectTypes.GERMLINE.value = {
+    GERMLINE = {
         ProjectAlgorithmKeys.ALIGNER: [
             "BWA2"
         ],

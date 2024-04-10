@@ -36,7 +36,7 @@ from cosapweb.api.permissions import IsOwnerOrDoesNotExist, OnlyAdminToList
 
 from ..common.utils import (convert_file_relative_path_to_absolute_path,
                             create_chonky_filemap)
-from .helpers.project_helpers import get_project_dir
+from .helpers.project_helpers import get_project_dir, remove_project_data_and_snvs
 from .constants import ProjectStatus, ProjectTypeAlgorithms, ProjectTypes
 
 USER = get_user_model()
@@ -257,6 +257,9 @@ class ProjectViewSet(viewsets.ModelViewSet):
         
         project.status = ProjectStatus.PENDING.value
         project.save()
+
+        # Remove project data and snvs
+        remove_project_data_and_snvs(pk)
 
         return HttpResponse(status=status.HTTP_200_OK)
 

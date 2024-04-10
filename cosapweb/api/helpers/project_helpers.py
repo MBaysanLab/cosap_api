@@ -191,3 +191,17 @@ def get_or_create_project_summary(project_id):
     project_summary = ProjectSummary.objects.get_or_create(project=project)[0]
 
     return project_summary
+
+def remove_project_data_and_snvs(project_id):
+    """
+    Removes project data and snvs.
+    """
+
+    project = Project.objects.get(id=project_id)
+    project_snvs = ProjectSNVs.objects.get(project=project)
+    project_summary = ProjectSummary.objects.get(project=project)
+    project_snv_data = ProjectSNVData.objects.get(project=project)
+
+    project_snvs.delete()
+    project_summary.delete()
+    project_snv_data.delete()

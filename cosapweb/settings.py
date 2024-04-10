@@ -234,3 +234,5 @@ ignore_logger("django.security.DisallowedHost")
 #         },
 #     },
 # }
+
+DATA_UPLOAD_MAX_NUMBER_FIELDS = 100000
