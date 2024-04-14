@@ -17,6 +17,7 @@ from django.db.models.query import QuerySet
 from django.forms.models import model_to_dict
 from django.http import Http404, HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
+from django.core.paginator import Paginator
 from django_drf_filepond.parsers import PlainTextParser, UploadChunkParser
 from django_drf_filepond.renderers import PlainTextRenderer
 from django_drf_filepond.views import PatchView, ProcessView
@@ -284,9 +285,12 @@ class ProjectSNVViewset(viewsets.ViewSet):
     def retrieve(self, request, pk=None):
         project = Project.objects.get(id=pk)
         project_snvs = ProjectSNVs.objects.get(project=project)
+        
+        page = request.GET.get("page")
+        paginator = Paginator(project_snvs.snvs.all(), 25)
 
         all_variants = []
-        for snv in project_snvs.snvs.all():
+        for snv in paginator.get_page(page):
             variant_dict = model_to_dict(snv)
             try:
                 variant_dict["af"] = ProjectSNVData.objects.get(
@@ -312,7 +316,7 @@ class ProjectSNVViewset(viewsets.ViewSet):
             for key, value in variant.items():
                 if isinstance(value, float) and not (-3.4e+38 < value < 3.4e+38):
                     variant[key] = str(value)
-        return Response(all_variants)
+        return Response({"snvs": all_variants, "total": paginator.count})
 
 
 class IGVDataView(views.APIView):

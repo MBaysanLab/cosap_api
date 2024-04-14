@@ -41,7 +41,7 @@ def create_snv(variant_id: str) -> SNV:
 
 
 def update_snv(variant_dict: dict) -> SNV:
-    snv = SNV.objects.get_or_create(variant_id=variant_dict["variant_id"])
+    snv, _ = SNV.objects.get_or_create(variant_id=variant_dict["variant_id"])
     
     snv_attributes = SNV.__dict__.keys()
 
