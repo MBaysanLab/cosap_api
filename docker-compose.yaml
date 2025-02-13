@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   cosap:
     image: itubioinformatics/cosap:latest
@@ -18,18 +16,19 @@ services:
       - .env
     working_dir: /webapi/data
   db:
-    image: postgres
+    image: postgres:latest
     volumes:
-      - ./data/db:/var/lib/postgresql/data
+      - ${COSAP_DB_DATA}:/var/lib/postgresql/data
     environment:
-      - POSTGRES_NAME=${COSAP_POSTGRES_NAME}
-      - POSTGRES_USER=${COSAP_POSTGRES_USER}
-      - POSTGRES_PASSWORD=${COSAP_POSTGRES_PASSWORD}
+      - POSTGRES_DB=${COSAP_DB_NAME}
+      - POSTGRES_USER=${COSAP_DB_USER}
+      - POSTGRES_PASSWORD=${COSAP_DB_PASSWORD}
     restart: unless-stopped
     ports:
       - "5432:5432"
+    command: bash -c "chown -R postgres:postgres /var/lib/postgresql/data && docker-entrypoint.sh postgres"
   web:
-    build: .
+    build: ./docker
     command:
       [
         "bash",
@@ -47,8 +46,8 @@ services:
       - db
     restart: unless-stopped
   celeryworker:
-    build: .
-    command: celery -A cosapweb worker -l INFO
+    build: ./docker
+    command: celery -A cosap_api worker -l INFO
     volumes:
       - .:/webapi
     env_file:
@@ -73,5 +72,15 @@ services:
       - RABBITMQ_DEFAULT_VHOST=vhost
       - RABBITMQ_DEFAULT_USER=guest
       - RABBITMQ_DEFAULT_PASS=guest
+  mailhog:
+    image: mailhog/mailhog
+    ports:
+      - "1025:1025"
+      - "8025:8025"
 volumes:
-  postgres-data:
+  pgdata:
+    driver: local
+    driver_opts:
+      type: none
+      device: ${COSAP_DB_DATA}
+      o: bind
