@@ -2,7 +2,7 @@ services:
   cosap:
     image: itubioinformatics/cosap:latest
     volumes:
-      - ./data:/webapi/data/
+      - ${COSAP_MEDIA_ROOT}:/user_files
       - ${COSAP_HG38_BUNDLE}:/cosap_data
       - /var/run/docker.sock:/var/run/docker.sock
     command:
@@ -10,11 +10,11 @@ services:
         "bash",
         "-l",
         "-c",
-        "celery -A cosap.celery.celery worker -l info -Q cosap_worker -c 3 -n cosap_worker@%h -Ofair",
+        "celery -A cosap.celery.celery worker -l INFO -Q cosap_worker -c 3 -n cosap_worker@%h -Ofair",
       ]
     env_file:
       - .env
-    working_dir: /webapi/data
+    working_dir: /user_files
   db:
     image: postgres:latest
     volumes:
@@ -37,6 +37,7 @@ services:
         "python -u manage.py wait_for_db && python manage.py runserver 0:8000",
       ]
     volumes:
+      - ${COSAP_MEDIA_ROOT}:/user_files
       - .:/webapi
     ports:
       - "8000:8000"
@@ -49,6 +50,7 @@ services:
     build: ./docker
     command: celery -A cosap_api worker -l INFO
     volumes:
+      - ${COSAP_MEDIA_ROOT}:/user_files
       - .:/webapi
     env_file:
       - .env
@@ -72,15 +74,23 @@ services:
       - RABBITMQ_DEFAULT_VHOST=vhost
       - RABBITMQ_DEFAULT_USER=guest
       - RABBITMQ_DEFAULT_PASS=guest
-  mailhog:
-    image: mailhog/mailhog
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.2
     ports:
-      - "1025:1025"
-      - "8025:8025"
+      - "9200:9200"
+      - "9300:9300"
+    environment:
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - cluster.routing.allocation.disk.threshold_enabled=false
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-changeme}
+    volumes:
+      - elasticsearchdata:/usr/share/elasticsearch/data
+    restart: unless-stopped
+  # mailhog:
+  #   image: mailhog/mailhog
+  #   ports:
+  #     - "1025:1025"
+  #     - "8025:8025"
 volumes:
-  pgdata:
-    driver: local
-    driver_opts:
-      type: none
-      device: ${COSAP_DB_DATA}
-      o: bind
+  elasticsearchdata:

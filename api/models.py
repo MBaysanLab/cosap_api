@@ -1,17 +1,18 @@
 import os
 import uuid
+from pathlib import PurePosixPath
 
 from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.models import AbstractUser, UserManager
-from django.db import models
+from django.db import models, transaction
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django_countries.fields import CountryField
 from rest_framework.authtoken.models import Token
-from .constants import ProjectStatus
-from django.db import transaction
+
+from .constants import ProjectStatus, FileExtensions
 
 
 class CustomUserManager(UserManager):
@@ -45,6 +46,7 @@ class CustomUser(AbstractUser):
     )  # changes email to unique and blank to false
     username = models.CharField(max_length=50, null=True)
     is_email_verified = models.BooleanField(default=False)
+    is_guest = models.BooleanField(default=False)
     objects = CustomUserManager()
 
     REQUIRED_FIELDS = []
@@ -58,8 +60,12 @@ class Project(models.Model):
 
     SOMATIC = "SOMATIC"
     GERMLINE = "GERMLINE"
-    PROJECT_TYPE_CHOICES = [(SOMATIC, "somatic"), (GERMLINE, "germline")]
-
+    GERMLINE_TRIO = "GERMLINE_TRIO"
+    PROJECT_TYPE_CHOICES = [
+        (SOMATIC, "somatic"),
+        (GERMLINE, "germline"),
+        (GERMLINE_TRIO, "germline_trio"),
+    ]
 
     PROJECT_STATUS_CHOICES = [
         (ProjectStatus.PENDING.value, "pending"),
@@ -85,12 +91,11 @@ class Project(models.Model):
 
     def __str__(self):
         return f"{self.id} - {self.name}"
-    
+
     def set_field(self, field, value):
         with transaction.atomic():
             setattr(self, field, value)
             self.save(update_fields=[field])
-
 
 
 class ProjectSummary(models.Model):
@@ -107,33 +112,44 @@ class ProjectSummary(models.Model):
         return f"{self.project.name} summary"
 
 
+class ProjectQCSummary(models.Model):
+    project = models.ForeignKey(Project, on_delete=models.CASCADE)
+    mapped_reads = models.FloatField(null=True, blank=True)
+    total_reads = models.FloatField(null=True, blank=True)
+    mean_coverage = models.FloatField(null=True, blank=True)
+    duplication_rate = models.FloatField(null=True, blank=True)
+    insert_size = models.FloatField(null=True, blank=True)
+    error_rate = models.FloatField(null=True, blank=True)
+
+    def __str__(self) -> str:
+        return f"{self.project.name} qc summary"
+
+
 class SmallVariant(models.Model):
     chrom = models.CharField(max_length=256)
     pos = models.IntegerField()
     ref = models.CharField(max_length=256)
     alt = models.CharField(max_length=256)
-    variant_id = models.CharField(max_length=256)
+    variant_id = models.CharField(max_length=1024, unique=True)
 
     class Meta:
         indexes = [
             models.Index(fields=["chrom", "pos"]),
             models.Index(fields=["variant_id"]),
         ]
-    
+        constraints = [
+            models.UniqueConstraint(
+                fields=["chrom", "pos", "ref", "alt"], name="unique_variant"
+            )
+        ]
+
     def __str__(self) -> str:
         return self.variant_id
-    
+
     def save(self, *args, **kwargs):
         if not self.variant_id:
             self.variant_id = f"{self.chrom}_{self.pos}_{self.ref}_{self.alt}"
-        
-        if not self.chrom or not self.pos or not self.ref or not self.alt:
-            chrom, pos, ref, alt = self.variant_id.split("_")
-            self.chrom = chrom
-            self.pos = pos
-            self.ref = ref
-            self.alt = alt
-        
+
         super(SmallVariant, self).save(*args, **kwargs)
 
 
@@ -155,52 +171,46 @@ class VariantAnnotation(models.Model):
     hgvsg = models.CharField(max_length=256, null=True, blank=True)
     hgvsc = models.CharField(max_length=256, null=True, blank=True)
     hgvsp = models.CharField(max_length=256, null=True, blank=True)
-    vep_pick = models.BooleanField(default=False)
+    vep_pick = models.BooleanField(default=False, null=True, blank=True)
     mane = models.CharField(max_length=256, null=True, blank=True)
-    cannonical = models.BooleanField(default=False)
-    gnomad_af = models.FloatField(null=True, blank=True)
+    canonical = models.BooleanField(default=False, null=True, blank=True)
+    gnomadg_af = models.FloatField(null=True, blank=True)
+    gnomadg_afr_af = models.FloatField(null=True, blank=True)
+    gnomadg_amr_af = models.FloatField(null=True, blank=True)
+    gnomadg_ami_af = models.FloatField(null=True, blank=True)
+    gnomadg_asj_af = models.FloatField(null=True, blank=True)
+    gnomadg_eas_af = models.FloatField(null=True, blank=True)
+    gnomadg_fin_af = models.FloatField(null=True, blank=True)
+    gnomadg_nfe_af = models.FloatField(null=True, blank=True)
+    gnomadg_mid_af = models.FloatField(null=True, blank=True)
+    gnomadg_oth_af = models.FloatField(null=True, blank=True)
+    gnomadg_sas_af = models.FloatField(null=True, blank=True)
     aminoacid_change = models.TextField(max_length=256, null=True, blank=True)
     sift_score = models.CharField(max_length=256, null=True, blank=True)
     polyphen_score = models.CharField(max_length=256, null=True, blank=True)
     clinvar_classification = models.TextField(max_length=256, null=True, blank=True)
     clinical_significance = models.TextField(max_length=256, null=True, blank=True)
     alphamissense_class = models.TextField(max_length=256, null=True, blank=True)
-    alphamissense_pathogenicity = models.TextField(max_length=256, null=True, blank=True)
+    alphamissense_pathogenicity = models.TextField(
+        max_length=256, null=True, blank=True
+    )
     pubmed = models.TextField(max_length=256, null=True, blank=True)
 
     # InterVar fields
     intervar_classification = models.CharField(max_length=256, null=True, blank=True)
     interpro_domain = models.TextField(max_length=256, null=True, blank=True)
-    cosmic_id = models.CharField(max_length=256, null=True, blank=True)
+    cosmic = models.CharField(max_length=1024, null=True, blank=True)
     evidence_intervar = models.TextField(max_length=256, null=True, blank=True)
     orpha_number = models.CharField(max_length=256, null=True, blank=True)
     orpha_info = models.TextField(max_length=256, null=True, blank=True)
+    omim = models.CharField(max_length=256, null=True, blank=True)
 
     # Cancervar fields
     cancervar_classification = models.CharField(max_length=256, null=True, blank=True)
     evidence_cancervar = models.TextField(max_length=256, null=True, blank=True)
-    
-    def __str__(self) -> str:
-        return self.variant.variant_id
-
-class ProjectSmallVariants(models.Model):
-    project = models.ForeignKey(Project, null=True, on_delete=models.CASCADE)
-    snvs = models.ManyToManyField(VariantAnnotation)
 
     def __str__(self) -> str:
-        return f"{self.project.id}_{self.project.name} - snvs"
-
-
-class ProjectSmallVariantData(models.Model):
-    project = models.ForeignKey(Project, null=True, on_delete=models.CASCADE)
-    variant = models.ForeignKey(VariantAnnotation, null=True, on_delete=models.SET_NULL)
-    genotype = models.CharField(max_length=256, null=True, blank=True)
-    allele_frequency = models.FloatField(null=True, blank=True)
-    allele_depth = models.IntegerField(null=True, blank=True)
-    read_depth = models.IntegerField(null=True, blank=True)
-
-    def __str__(self) -> str:
-        return f"{self.project.id}_{self.project.name} - small variant data"
+        return self.variant.variant_id + "_annotation"
 
 
 class SV(models.Model):
@@ -233,18 +243,12 @@ def user_directory_path(instance, filename):
 
 class File(models.Model):
 
-    TUMOR = "TUMOR"
-    NORMAL = "NORMAL"
-    SAMPLE_TYPES = [(TUMOR, "tumor"), (NORMAL, "normal")]
-
     user = models.ForeignKey(USER, null=True, on_delete=models.SET_NULL)
     uuid = models.CharField(max_length=256, default=uuid.uuid4, editable=True)
-    uploaded_at = models.DateTimeField(auto_now_add=True)
+    upload_time = models.DateTimeField(auto_now_add=True)
     name = models.CharField(max_length=256, blank=True, null=True)
     file_type = models.CharField(max_length=64, blank=True, null=True)
-    sample_type = models.CharField(
-        choices=SAMPLE_TYPES, null=True, blank=True, max_length=256
-    )
+
     file = models.FileField(upload_to=user_directory_path, max_length=256)
     is_demo = models.BooleanField(default=False)
     is_draft = models.BooleanField(default=False)
@@ -255,10 +259,30 @@ class File(models.Model):
     def save(self, *args, **kwargs):
         if not self.name:
             self.name = self.file.name
+
+        # Get file extension
+        filename = PurePosixPath(self.name)
+        suffixes = set([suffix[1:] for suffix in filename.suffixes])
+
+        extensions_dict = {
+            member.name: member.value for member in FileExtensions.__members__.values()
+        }
+        found_type = FileExtensions.UNKNOWN.value
+        for file_type, extensions in extensions_dict.items():
+            if isinstance(extensions, tuple):
+                extensions_set = set(extensions)
+            elif isinstance(extensions, str):
+                extensions_set = {extensions}
+
+            if extensions_set.intersection(suffixes):
+                found_type = file_type
+                break
+        
+        self.file_type = found_type
         super(File, self).save(*args, **kwargs)
 
 
-class ProjectFiles(models.Model):
+class ProjectFile(models.Model):
     project = models.ForeignKey(Project, on_delete=models.SET_NULL, null=True)
     files = models.ManyToManyField(File)
 
@@ -267,6 +291,82 @@ class ProjectFiles(models.Model):
             return f"{self.project.name}_files"
         else:
             return f"{self.id}_files"
+
+
+class Sample(models.Model):
+
+    TUMOR = "TUMOR"
+    NORMAL = "NORMAL"
+    SAMPLE_TYPES = [(TUMOR, "tumor"), (NORMAL, "normal")]
+
+    user = models.ForeignKey(USER, null=True, on_delete=models.SET_NULL)
+    name = models.CharField(max_length=256)
+    uuid = models.CharField(max_length=256, default=uuid.uuid4, editable=True)
+    sample_type = models.CharField(
+        choices=SAMPLE_TYPES, null=True, blank=True, max_length=256
+    )
+
+    SEX_CHOICES = [("MALE", "male"), ("FEMALE", "female"), ("UNKNOWN", "unknown")]
+    sex = models.CharField(choices=SEX_CHOICES, null=True, blank=True, max_length=256)
+
+    PHENO_CHOICES = [(-9, "missing"), (1, "unaffected"), (2, "affected")]
+    phenotype = models.IntegerField(choices=PHENO_CHOICES, null=True, blank=True)
+
+    father = models.ForeignKey(
+        "self",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="father_of",
+    )
+    mother = models.ForeignKey(
+        "self",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="mother_of",
+    )
+
+    files = models.ManyToManyField(File)
+
+    def save(self, *args, **kwargs):
+        if not self.name:
+            self.name = str(self.uuid)[:8]
+        super(Sample, self).save(*args, **kwargs)
+
+    def __str__(self):
+        return self.name
+    
+    def get_sample_file_type(self):
+        return self.files.first().file_type
+
+
+class SampleSmallVariant(models.Model):
+    sample = models.ForeignKey(Sample, on_delete=models.CASCADE)
+    variants = models.ManyToManyField(SmallVariant)
+
+    def __str__(self) -> str:
+        return f"{self.sample.id}_{self.sample.name} - snvs"
+
+
+class SampleSmallVariantData(models.Model):
+    sample = models.ForeignKey(Sample, on_delete=models.CASCADE)
+    variant = models.ForeignKey(SmallVariant, on_delete=models.CASCADE)
+    genotype = models.CharField(max_length=256, null=True, blank=True)
+    allele_frequency = models.FloatField(null=True, blank=True)
+    allele_depth = models.IntegerField(null=True, blank=True)
+    read_depth = models.IntegerField(null=True, blank=True)
+
+    def __str__(self) -> str:
+        return f"{self.sample.id}_{self.sample.name} - small variant data"
+
+
+class ProjectSample(models.Model):
+    project = models.ForeignKey(Project, on_delete=models.CASCADE)
+    samples = models.ManyToManyField(Sample)
+
+    def __str__(self):
+        return f"{self.project.name}_samples"
 
 
 class Report(models.Model):

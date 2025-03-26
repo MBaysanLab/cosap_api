@@ -1,6 +1,8 @@
 from django.core.management.base import BaseCommand
-from ...models import VariantAnnotation
+
 from ...helpers.task_helpers import submit_cosap_annotation_task
+from ...models import VariantAnnotation
+
 
 class Command(BaseCommand):
     help = "Re-annotate all variants in the database."

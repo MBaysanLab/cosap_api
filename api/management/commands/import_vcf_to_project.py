@@ -1,6 +1,7 @@
 from django.core.management.base import BaseCommand
-from ...models import Project, USER
+
 from ...helpers.task_helpers import submit_vcf_parse_task
+from ...models import USER, Project
 
 
 class Command(BaseCommand):

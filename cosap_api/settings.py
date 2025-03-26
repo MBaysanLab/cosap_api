@@ -62,8 +62,10 @@ INSTALLED_APPS = [
     "rest_framework.authtoken",
     "corsheaders",
     "rest_framework",
+    "django_extensions",
     "django_drf_filepond",
     "django_json_widget",
+    "django_elasticsearch_dsl",
     "api",
 ]
 
@@ -160,7 +162,10 @@ USE_TZ = True
 
 # Stored files
 
-MEDIA_ROOT = os.path.join(BASE_DIR, "data")
+MEDIA_ROOT = "/user_files"
+MEDIA_TMP = os.path.join(MEDIA_ROOT, "tmp")
+os.makedirs(MEDIA_TMP, exist_ok=True)
+MEDIA_URL = "/media/"
 
 DJANGO_DRF_FILEPOND_UPLOAD_TMP = os.path.join(BASE_DIR, "filepond_temp_files")
 DJANGO_DRF_FILEPOND_FILE_STORE_PATH = BASE_DIR
@@ -203,6 +208,16 @@ CELERY_TASK_ROUTES = {
 }
 CELERY_ACCEPT_CONTENT = ["json", "msgpack", "yaml"]
 
+
+ELASTICSEARCH_DSL = {
+    "default": {
+        "hosts": "http://elasticsearch:9200",
+        "http_auth": ("elastic", "changeme"),
+        "timeout": 60,
+    },
+}
+
+
 sentry_sdk.init(
     dsn=os.environ.get("SENTRY_DSN"),
     integrations=[
@@ -219,32 +234,32 @@ sentry_sdk.init(
 ignore_logger("django.security.DisallowedHost")
 
 
-# LOGGING = {
-#     "version": 1,
-#     "disable_existing_loggers": False,
-#     "handlers": {
-#         "console": {
-#             "class": "logging.StreamHandler",
-#         },
-#         "file": {
-#             "level": "DEBUG",
-#             "class": "logging.FileHandler",
-#             "filename": "log.django",
-#         },
-#     },
-#     "loggers": {
-#         "django": {
-#             "handlers": ["console", "file"],
-#             "level": os.getenv("DJANGO_LOG_LEVEL", "DEBUG"),
-#         },
-#     },
-# }
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+        },
+        "file": {
+            "level": "DEBUG",
+            "class": "logging.FileHandler",
+            "filename": "log.django",
+        },
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console", "file"],
+            "level": os.getenv("DJANGO_LOG_LEVEL", "INFO"),
+        },
+    },
+}
 
 DATA_UPLOAD_MAX_NUMBER_FIELDS = 100000
 
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = 'mailhog'
+EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+EMAIL_HOST = "mailhog"
 EMAIL_PORT = 1025
 EMAIL_USE_TLS = False
 EMAIL_USE_SSL = False
-DEFAULT_FROM_EMAIL = 'webmaster@localhost'
+DEFAULT_FROM_EMAIL = "webmaster@localhost"

@@ -21,8 +21,8 @@ class Sampletypes(Enum):
 
 
 class FileExtensions(Enum):
-    FQ = ("fastq", "fq")
-    FA = ("fa", "fasta")
+    FASTQ = ("fastq", "fq")
+    FASTA = ("fa", "fasta")
     SAM = "sam"
     BAM = "bam"
     CRAM = "cram"
@@ -63,6 +63,7 @@ class ProjectTypes(Enum):
     SOMATIC = "SOMATIC"
     GERMLINE = "GERMLINE"
     COMPARATIVE = "COMPARATIVE"
+    GERMLINE_TRIO = "GERMLINE_TRIO"
     UNKNOWN = "UNKNOWN"
 
 
@@ -96,25 +97,24 @@ class VCFHeaders(Enum):
     INFO = "INFO"
     FORMAT = "FORMAT"
     SAMPLE = "SAMPLE"
+    AF = "AF"
+    DP = "DP"
+    AD = "AD"
+    GT = "GT"
+
 
 class ProjectTypeAlgorithms(Enum):
     SOMATIC = {
-         ProjectAlgorithmKeys.ALIGNER.value: [
-            "BWA2"
-        ],
-        ProjectAlgorithmKeys.VARIANT_CALLER.value: [
-            "Mutect2"
-        ],
-        ProjectAlgorithmKeys.VARIANT_ANNOTATOR.value: []
+        ProjectAlgorithmKeys.ALIGNER.value: ["BWA2"],
+        ProjectAlgorithmKeys.VARIANT_CALLER.value: ["Mutect2"],
+        ProjectAlgorithmKeys.VARIANT_ANNOTATOR.value: [],
     }
     GERMLINE = {
-        ProjectAlgorithmKeys.ALIGNER.value: [
-            "BWA2"
-        ],
-        ProjectAlgorithmKeys.VARIANT_CALLER.value: [
-            "HaplotypeCaller"
-        ],
-        ProjectAlgorithmKeys.VARIANT_ANNOTATOR.value: []
+        ProjectAlgorithmKeys.ALIGNER.value: ["BWA2"],
+        ProjectAlgorithmKeys.VARIANT_CALLER.value: ["HaplotypeCaller"],
+        ProjectAlgorithmKeys.VARIANT_ANNOTATOR.value: [],
     }
+
+
 class AdminConstants(Enum):
     WORKDIR = "admin_workdir"

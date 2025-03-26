@@ -1,22 +1,25 @@
 import os
 
+# from .variant_helpers import create_snv
+import warnings
+
 from celery.result import AsyncResult
 from django.db.models import Q
 
 from ..constants import CosapDnaTaskInputs, ProjectAlgorithmKeys
 from ..models import (
-    VariantAnnotation,
     Project,
-    ProjectFiles,
-    ProjectSmallVariants,
+    ProjectFile,
+    SampleSmallVariantData,
+    SampleSmallVariant,
     ProjectSummary,
     ProjectTask,
-    ProjectSmallVariantData,
+    VariantAnnotation,
+    Sample,
+    ProjectSample,
 )
 from .file_helpers import wait_file_update_complete
 from .user_helpers import get_user_dir
-from .variant_helpers import create_snv
-import warnings
 
 
 def set_project_status(project_id, status):
@@ -28,6 +31,7 @@ def set_project_status(project_id, status):
         status=status,
     )
 
+
 def set_project_stderr(project_id, stderr):
     """
     Sets project stderr.
@@ -36,6 +40,7 @@ def set_project_stderr(project_id, stderr):
     Project.objects.filter(id=project_id).update(
         stderr=stderr,
     )
+
 
 def get_project_dir(project_id):
     try:
@@ -52,7 +57,7 @@ def update_project_variant_stats(project_id):
 
     project_summary = get_or_create_project_summary(project_id)
     project = Project.objects.get(id=project_id)
-    project_snvs = ProjectSmallVariants.objects.get(project=project)
+    project_snvs = SampleSmallVariant.objects.get(project=project)
 
     snvs = project_snvs.snvs.all()
 
@@ -83,7 +88,9 @@ def create_project_snvs(project_id, variant_list):
     """
 
     project = Project.objects.get(id=project_id)
-    project_small_variants = ProjectSmallVariants.objects.get_or_create(project=project)[0]
+    project_small_variants = SampleSmallVariant.objects.get_or_create(
+        project=project
+    )[0]
 
     # Get snv list and create SNV objects. Check every field if they are in SNV model.
     for variant in variant_list:
@@ -99,7 +106,7 @@ def create_project_snvs(project_id, variant_list):
         project_small_variants.snvs.add(svar)
 
         # Create ProjectSNVData object
-        ProjectSmallVariantData.objects.create(
+        SampleSmallVariantData.objects.create(
             project=project,
             variant=svar,
             allele_frequency=variant.get("AF"),
@@ -110,22 +117,40 @@ def create_project_snvs(project_id, variant_list):
     project_small_variants.save()
 
 
-def get_project_files(project_id, sample_type=None, file_type=None):
+def get_project_samples(project_id, sample_type=None):
+    """
+    Returns project samples.
+    """
+
+    project = Project.objects.get(id=project_id)
+
+    try:
+        project_samples = ProjectSample.objects.get(project=project)
+    except ProjectSample.DoesNotExist:
+        raise Exception("Project samples do not exist.")
+
+    if sample_type:
+        samples = list(project_samples.samples.filter(sample_type=sample_type))
+    else:
+        samples = list(project_samples.samples.all())
+    
+    return samples
+
+
+def get_project_files(project_id, file_type=None):
 
     project = Project.objects.get(id=project_id)
     try:
-        project_file_obj = ProjectFiles.objects.get(project=project)
-    except ProjectFiles.DoesNotExist:
-        raise Exception("Project files are not ready.")
-
-    if sample_type:
-        project_files = project_file_obj.files.filter(sample_type=sample_type)
-    elif file_type:
-        project_files = project_file_obj.files.filter(file_type=file_type)
+        project_file_obj = ProjectFile.objects.get(project=project)
+    except ProjectFile.DoesNotExist:
+        raise Exception("Project files do not exist.")
+    
+    if file_type:
+        files = list(project_file_obj.files.filter(file_type=file_type))
     else:
-        project_files = project_file_obj.files.all()
+        files = list(project_file_obj.files.all())
 
-    return project_files
+    return files
 
 
 def get_project_algorithms(project_id):
@@ -158,7 +183,7 @@ def get_project_type(project_id):
     return project.project_type
 
 
-def project_files_ready(project_id):
+def are_project_files_ready(project_id):
     """
     Waits for project files to be ready.
     """
@@ -166,12 +191,22 @@ def project_files_ready(project_id):
     project = Project.objects.get(id=project_id)
 
     try:
-        project_files = ProjectFiles.objects.get(project=project)
-    except ProjectFiles.DoesNotExist:
+        project_files = ProjectFile.objects.get(project=project)
+    except ProjectFile.DoesNotExist:
         warnings.warn("The project does not have any files.")
         return False
-    
-    return all([wait_file_update_complete(file.file.path) for file in project_files.files.all()])
+
+    try:
+        project_samples = ProjectSample.objects.get(project=project)
+    except ProjectSample.DoesNotExist:
+        warnings.warn("The project does not have any samples.")
+        return False
+
+    all_files = list(project_files.files.all()) + [
+        sample.file for sample in project_samples.samples.all()
+    ]
+
+    return all([wait_file_update_complete(file.file.path) for file in all_files])
 
 
 def update_project_summary(project_id, qc_results=None, msi_score=None):
@@ -200,26 +235,40 @@ def get_or_create_project_summary(project_id):
 
     return project_summary
 
+
 def remove_project_data_and_snvs(project_id):
     """
     Removes project data and snvs.
     """
     try:
         project = Project.objects.get(id=project_id)
-        project_snvs = ProjectSmallVariants.objects.get(project=project)
+        project_snvs = SampleSmallVariant.objects.get(project=project)
         project_summary = ProjectSummary.objects.get(project=project)
-        project_snv_data = ProjectSmallVariantData.objects.get(project=project)
+        project_snv_data = SampleSmallVariantData.objects.get(project=project)
 
         project_snvs.delete()
         project_summary.delete()
         project_snv_data.delete()
     except Project.DoesNotExist:
         print(f"Project with id {project_id} does not exist.")
-    except ProjectSmallVariants.DoesNotExist:
+    except SampleSmallVariant.DoesNotExist:
         print(f"ProjectSNVs for project id {project_id} does not exist.")
     except ProjectSummary.DoesNotExist:
         print(f"ProjectSummary for project id {project_id} does not exist.")
-    except ProjectSmallVariantData.DoesNotExist:
+    except SampleSmallVariantData.DoesNotExist:
         print(f"ProjectSNVData for project id {project_id} does not exist.")
     except Exception as e:
         print(f"An error occurred: {e}")
+
+
+def add_sample_to_project(project_samples, sample_id):
+    """
+    Adds sample to project.
+    """
+
+    if not sample_id:
+        return None
+
+    sample = Sample.objects.get(uuid=sample_id)
+    project_samples.samples.add(sample)
+    return sample

@@ -1,11 +1,10 @@
-from django.contrib.auth import (authenticate, get_user_model,
-                                 password_validation)
+from django.contrib.auth import authenticate, get_user_model, password_validation
+from django.urls import reverse
 from rest_framework import serializers
 from rest_framework.authtoken.models import Token
-from django.urls import reverse
-from common.utils import send_verification_email
 
-from api.models import Action, Affiliation, File, Project
+from api.models import Action, Affiliation, File, Project, Sample
+from common.utils import send_verification_email
 
 USER = get_user_model()
 
@@ -55,11 +54,13 @@ class RegistrationSerializer(serializers.ModelSerializer):
             "last_name",
             "email",
             "affiliations",
+            "is_guest",
         ]
         extra_kwargs = {
             "first_name": {"required": True},
             "last_name": {"required": True},
             "affiliations": {"required": False},
+
         }
 
     def create(self, data):
@@ -70,14 +71,16 @@ class RegistrationSerializer(serializers.ModelSerializer):
             first_name=data["first_name"],
             last_name=data["last_name"],
             email=data["email"],
-            is_email_verified=False,
+            is_email_verified=data.get("is_guest", False),
+            is_guest=data.get("is_guest", False),
         )
         user.set_password(data["password"])
         user.save()
 
         # Generate verification link
-        verification_link = reverse('verify-email', args=[user.pk])
-        send_verification_email(user, verification_link)
+        if not user.is_guest:
+            verification_link = reverse("verify-email", args=[user.pk])
+            send_verification_email(user, verification_link)
 
         return user
 

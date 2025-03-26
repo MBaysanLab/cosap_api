@@ -12,6 +12,7 @@ router.register(r"get_user", views.VerifyUserVeiwSet, basename="get_user")
 router.register(r"projects", views.ProjectViewSet, basename="project")
 router.register(r"actions", views.ActionViewSet, basename="action")
 router.register(r"variants", views.ProjectSNVViewset, basename="project_variants")
+router.register(r"samples", views.SampleViewSet, basename="sample")
 
 urlpatterns = [
     path("", include(router.urls)),
@@ -29,6 +30,14 @@ urlpatterns = [
     ),
     path("change_password/", views.VerifyUserVeiwSet.as_view({"put": "update"})),
     re_path(r"igv/(?P<b64_string>.+)/?$", views.IGVDataView.as_view()),
-    path('verify-email/', views.VerifyUserVeiwSet.as_view({"post": "verify_email"}), name='verify-email'),
-    path('verify-email/<int:user_id>/', views.VerifyUserVeiwSet.as_view({"post": "verify_email"}), name='verify-email'),
+    path(
+        "verify-email/",
+        views.VerifyUserVeiwSet.as_view({"post": "verify_email"}),
+        name="verify-email",
+    ),
+    path(
+        "verify-email/<int:user_id>/",
+        views.VerifyUserVeiwSet.as_view({"post": "verify_email"}),
+        name="verify-email",
+    ),
 ]

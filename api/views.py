@@ -8,6 +8,8 @@ from pathlib import Path
 from urllib import request
 from wsgiref.util import FileWrapper
 import zipfile
+from collections import defaultdict
+import random
 
 import pysam
 from django.contrib.auth import get_user_model
@@ -30,17 +32,39 @@ from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 
 from api import serializers
-from api.models import (VariantAnnotation, Action, File, Project, ProjectFiles,
-                                 ProjectSmallVariantData, ProjectSmallVariants, ProjectSummary,
-                                 ProjectTask)
+from api.models import (
+    VariantAnnotation,
+    Action,
+    File,
+    Project,
+    ProjectFile,
+    SampleSmallVariantData,
+    SampleSmallVariant,
+    ProjectSummary,
+    ProjectQCSummary,
+    ProjectTask,
+    Sample,
+    ProjectSample,
+)
 from api.permissions import IsOwnerOrDoesNotExist, OnlyAdminToList
 
-from common.utils import (convert_file_relative_path_to_absolute_path,
-                            create_chonky_filemap)
-from .helpers.project_helpers import get_project_dir, remove_project_data_and_snvs
+from common.utils import (
+    convert_file_relative_path_to_absolute_path,
+    create_chonky_filemap,
+    order_variants_by_acmg_severity,
+)
+from .helpers.project_helpers import (
+    get_project_dir,
+    remove_project_data_and_snvs,
+    add_sample_to_project,
+)
 from .constants import ProjectStatus, ProjectTypeAlgorithms, ProjectTypes
+from .elasticsearch_queries import filter_variants_by_annotation
+from logging import getLogger
 
 USER = get_user_model()
+
+logger = getLogger(__name__)
 
 
 class UserViewSet(
@@ -113,12 +137,15 @@ class VerifyUserVeiwSet(viewsets.ViewSet):
     def verify_email(self, request):
         email = request.data.get("email")
         if not email:
-            return Response({"error": "Email is required"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "Email is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
 
         user = USER.objects.filter(email=email).first()
         if user:
             return Response({"email": user.email}, status=status.HTTP_200_OK)
         return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+
 
 class AuthTokenViewSet(ObtainAuthToken, viewsets.ViewSet):
     """
@@ -129,11 +156,16 @@ class AuthTokenViewSet(ObtainAuthToken, viewsets.ViewSet):
     permission_classes = [permissions.AllowAny]
 
     def create(self, request, *args, **kwargs):
-        serializer = self.serializer_class(data=request.data, context={'request': request})
+        serializer = self.serializer_class(
+            data=request.data, context={"request": request}
+        )
         serializer.is_valid(raise_exception=True)
-        user = serializer.validated_data['user']
+        user = serializer.validated_data["user"]
         if not user.is_email_verified:
-            return Response({"error": "Email not verified. Please verify your email to log in."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "Email not verified. Please verify your email to log in."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         token, created = Token.objects.get_or_create(user=user)
         return Response({"token": token.key})
 
@@ -192,15 +224,15 @@ class ProjectViewSet(viewsets.ModelViewSet):
         user = request.user
         project_type = request.POST.get("project_type")
         name = request.POST.get("name")
-        
-        # If project type is somatic or germline set predifined algorithms
+
+        # If project type is somatic or germline set predifined algorithms
         if project_type == ProjectTypes.SOMATIC.value:
             algorithms = ProjectTypeAlgorithms[ProjectTypes.SOMATIC.value].value
         elif project_type == ProjectTypes.GERMLINE.value:
             algorithms = ProjectTypeAlgorithms[ProjectTypes.GERMLINE.value].value
         else:
             algorithms = json.loads(request.POST.get("algorithms", "{}"))
-        
+
         new_project = Project.objects.create(
             user=user,
             project_type=project_type,
@@ -210,25 +242,47 @@ class ProjectViewSet(viewsets.ModelViewSet):
             is_draft=True,
         )
 
-        normal_file_ids = json.loads(request.POST.get("normal_files", "[]"))
-        tumor_file_ids = json.loads(request.POST.get("tumor_files", "[]"))
-        bed_file_ids = json.loads(request.POST.get("bed_files", "[]"))
+        # TODO: Get rid of hard coded keys and values
+        normal_sample_id = request.POST.get("normal_sample_id")
+        tumor_sample_id = request.POST.get("tumor_sample_id")
+        child_sample_id = request.POST.get("child_sample_id")
+        mother_sample_id = request.POST.get("mother_sample_id")
+        father_sample_id = request.POST.get("father_sample_id")
 
-        project_files = ProjectFiles.objects.create(project=new_project)
+        project_samples = ProjectSample.objects.create(project=new_project)
 
-        for file_id in normal_file_ids:
-            file = File.objects.get(uuid=file_id)
-            project_files.files.add(file)
+        if normal_sample_id:
+            sample = Sample.objects.get(uuid=normal_sample_id)
+            project_samples.samples.add(sample)
 
-        for file_id in tumor_file_ids:
-            file = File.objects.get(uuid=file_id)
-            project_files.files.add(file)
+        if tumor_sample_id:
+            sample = Sample.objects.get(uuid=tumor_sample_id)
+            project_samples.samples.add(sample)
 
-        for file_id in bed_file_ids:
-            file = File.objects.get(uuid=file_id)
-            project_files.files.add(file)
+        if child_sample_id:
+            child_sample = add_sample_to_project(project_samples, child_sample_id)
 
-        project_files.save()
+            mother_sample = add_sample_to_project(project_samples, mother_sample_id)
+            if mother_sample:
+                child_sample.mother = mother_sample
+                child_sample.save()
+
+            father_sample = add_sample_to_project(project_samples, father_sample_id)
+            if father_sample:
+                child_sample.father = father_sample
+                child_sample.save()
+        else:
+            # No child, just add parents to the project
+            add_sample_to_project(project_samples, mother_sample_id)
+            add_sample_to_project(project_samples, father_sample_id)
+
+        project_samples.save()
+
+        bed_file_id = request.POST.get("bed_file_id")
+        if bed_file_id:
+            project_files = ProjectFile.objects.create(project=new_project)
+            project_files.files.add(File.objects.get(uuid=bed_file_id))
+            project_files.save()
 
         new_project.is_draft = False
         new_project.save()
@@ -240,6 +294,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
         project_metadata = {
             "name": project.name,
+            "project_type": project.project_type,
             "status": project.status,
             "collaborators": ",".join(
                 [col.email for col in project.collaborators.all()]
@@ -247,12 +302,12 @@ class ProjectViewSet(viewsets.ModelViewSet):
             "time": project.created_at,
         }
 
-        summary = ProjectSummary.objects.get(project=project)
+        summary = ProjectQCSummary.objects.filter(project=project).first()
 
         return Response(
             {
                 "metadata": project_metadata,
-                "summary": model_to_dict(summary) if summary else None,
+                "qc_summary": model_to_dict(summary) if summary else None,
             },
             status=status.HTTP_200_OK,
         )
@@ -268,16 +323,12 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
         project = Project.objects.get(id=pk)
 
-        # If the project is already running, skip rerunning
+        # If the project is already running, skip rerunning
         if project.status == ProjectStatus.RUNNING.value:
             return HttpResponse(status=status.HTTP_200_OK)
-        
+
         project.status = ProjectStatus.PENDING.value
         project.save()
-
-        # Remove project data and snvs
-        remove_project_data_and_snvs(pk)
-
         return HttpResponse(status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"])
@@ -288,7 +339,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
             and not request.user.is_superuser
         ):
             return HttpResponse(status=status.HTTP_401_UNAUTHORIZED)
-        
+
         project = get_object_or_404(Project, pk=pk)
         project.delete()
 
@@ -302,44 +353,122 @@ class ProjectSNVViewset(viewsets.ViewSet):
         try:
             project = Project.objects.get(id=pk)
         except Project.DoesNotExist:
+            logger.error(f"Project with id {pk} does not exist")
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        if project.project_type == ProjectTypes.GERMLINE.value:
+            try:
+                sample = (
+                    ProjectSample.objects.get(project=project).samples.all().first()
+                )
+            except ProjectSample.DoesNotExist:
+                logger.error(f"Germline sample for project with id {pk} does not exist")
+                return Response(status=status.HTTP_404_NOT_FOUND)
+        elif project.project_type == ProjectTypes.SOMATIC.value:
+            try:
+                sample = ProjectSample.objects.get(
+                    project=project, sample_type=Sample.TUMOR
+                )
+            except ProjectSample.DoesNotExist:
+                logger.error(f"Tumor sample for project with id {pk} does not exist")
+                return Response(status=status.HTTP_404_NOT_FOUND)
+        elif project.project_type == ProjectTypes.GERMLINE_TRIO.value:
+            try:
+                # Get the ProjectSamples instance for this project
+                project_samples = ProjectSample.objects.filter(project=project).first()
+                
+                if not project_samples:
+                    logger.error(f"No samples found for project with id {pk}")
+                    return Response(status=status.HTTP_404_NOT_FOUND)
+                
+                # Get the proband (child) sample that has mother or father relationships
+                sample = project_samples.samples.filter(
+                    Q(mother__isnull=False) | Q(father__isnull=False)
+                ).first()
+                
+                if not sample:
+                    logger.error(f"Proband sample for project with id {pk} does not exist")
+                    return Response(status=status.HTTP_404_NOT_FOUND)
+                    
+            except ProjectSample.DoesNotExist:
+                logger.error(f"ProjectSamples for project with id {pk} does not exist")
+                return Response(status=status.HTTP_404_NOT_FOUND)
+        else:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
         try:
-            project_snvs = ProjectSmallVariants.objects.get(project=project)
-        except ProjectSmallVariants.DoesNotExist:
+            sample_small_variants = SampleSmallVariant.objects.get(
+                sample=sample
+            ).variants.all()
+        except SampleSmallVariant.DoesNotExist:
+            logger.error(f"SampleSmallVariants for sample with id {sample.id} does not exist")
             return Response(status=status.HTTP_404_NOT_FOUND)
-        
-        page = request.GET.get("page")
-        paginator = Paginator(project_snvs.snvs.all(), 25)
 
-        all_variants = []
+        # Get query parameters
+        page = request.GET.get("page", 1)
+        page_size = request.GET.get("page_size", 25)
+        filters = (
+            request.GET.get("filters", "").split(",")
+            if request.GET.get("filters")
+            else []
+        )
+
+        # Get filtered variants
+        variant_annotations = VariantAnnotation.objects.filter(
+            variant__in=sample_small_variants, vep_pick=True
+        )
+        variant_annotations_ids = variant_annotations.values_list("id", flat=True)
+
+        if filters:
+            variant_annotations = filter_variants_by_annotation(
+                filters, list(variant_annotations_ids)
+            )
+
+        # Sort the variants based on intervar_classification from most severe to least severe
+        # Most severe: 'Pathogenic', 'Likely pathogenic', 'Uncertain significance', 'Likely benign', 'Benign'
+        variant_annotations = order_variants_by_acmg_severity(variant_annotations)
+
+        paginator = Paginator(variant_annotations, page_size)
+
+        page_variants = []
         for snv in paginator.get_page(page):
-            variant_dict = model_to_dict(snv)
+            variant_dict = model_to_dict(snv, exclude=["variant"])
             try:
-                variant_dict["af"] = ProjectSmallVariantData.objects.get(
-                    project=project, snv=snv
-                ).allele_frequency
-                variant_dict["ad"] = ProjectSmallVariantData.objects.get(
-                    project=project, snv=snv
-                ).allele_depth
+                sample_snv_data = SampleSmallVariantData.objects.get(
+                    variant=snv.variant, sample=sample
+                )
+                variant_dict["sample_specific"] = model_to_dict(sample_snv_data)
+            except SampleSmallVariantData.DoesNotExist:
+                variant_dict["sample_specific"] = {}
+            
+            variant_dict["pedigree"] = defaultdict(dict)
+            if sample.mother:
+                try:
+                    mother_snv_data = SampleSmallVariantData.objects.get(
+                        variant=snv.variant, sample=sample.mother
+                    )
+                    variant_dict["pedigree"]["mother"] = model_to_dict(mother_snv_data)
+                except SampleSmallVariantData.DoesNotExist:
+                    variant_dict["pedigree"]["mother"]
+            if sample.father:
+                try:
+                    father_snv_data = SampleSmallVariantData.objects.get(
+                        variant=snv.variant, sample=sample.father
+                    )
+                    variant_dict["pedigree"]["father"] = model_to_dict(father_snv_data)
+                except SampleSmallVariantData.DoesNotExist:
+                    variant_dict["pedigree"]["father"]
+            
+            variant_dict["variant"] = model_to_dict(snv.variant)
+            page_variants.append(variant_dict)
 
-                # Internal variant frequency is the number of projects that have the variant over the total number of projects
-                internal_freq = ProjectSmallVariantData.objects.filter(
-                    snv=snv
-                ).count() / Project.objects.count()
-                variant_dict["user_case_frequency"] = f"{internal_freq:.2f}"
-
-            except Exception as e:
-                continue
-
-            all_variants.append(variant_dict)
-
-        # Convert out of range float values to string
-        for variant in all_variants:
+        # Convert out of range float values to string. 3.4e38 is the maximum value for float32
+        for variant in page_variants:
             for key, value in variant.items():
-                if isinstance(value, float) and not (-3.4e+38 < value < 3.4e+38):
+                if isinstance(value, float) and not (-3.4e38 < value < 3.4e38):
                     variant[key] = str(value)
-        return Response({"snvs": all_variants, "total": paginator.count})
+
+        return Response({"snvs": page_variants, "total": paginator.count})
 
 
 class IGVDataView(views.APIView):
@@ -408,6 +537,42 @@ class ActionViewSet(viewsets.ModelViewSet):
         return queryset
 
 
+class SampleViewSet(viewsets.ViewSet):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def list(self, request):
+        samples = Sample.objects.filter(user=request.user)
+        return Response(
+            [
+                {
+                    "id": sample.id,
+                    "name": sample.name,
+                    "sample_type": sample.sample_type,
+                }
+                for sample in samples
+            ]
+        )
+
+    def create(self, request):
+        sample_name = request.data.get("sample_name")
+        sample_type = request.data.get("sample_type")
+        sample_files_ids = request.data.get("file_ids")
+
+        if not sample_files_ids:
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+
+        sample = Sample.objects.create(
+            name=sample_name,
+            sample_type=sample_type,
+            user=request.user,
+        )
+        for file in sample_files_ids:
+            sample.files.add(File.objects.get(uuid=file))
+        sample.save()
+
+        return Response(str(sample.uuid))
+
+
 class FileViewSet(ProcessView, PatchView, viewsets.ViewSet):
     permission_classes = [permissions.IsAuthenticated]
     parser_classes = (MultiPartParser, UploadChunkParser)
@@ -463,38 +628,42 @@ class FileViewSet(ProcessView, PatchView, viewsets.ViewSet):
     def create(self, request, *args, **kwargs):
         if request.FILES.get("file"):
             filename = request.FILES.get("file").name
-            sample_type = request.POST.get("sample_type")
             file = request.FILES.get("file")
             user = request.user
-            f = File.objects.create(
-                name=filename, user=user, file=file, sample_type=sample_type
-            )
+            f = File.objects.create(name=filename, user=user, file=file)
             f.save()
             return Response(str(f.uuid))
         else:
             response = super().post(request, *args, **kwargs)
             if response.status_code == 200:
                 temp_id = response.data
-                sample_type = request.POST.get("sample_type")
                 f = File.objects.create(
-                    user=request.user, uuid=temp_id, sample_type=sample_type, is_draft=True
+                    user=request.user,
+                    uuid=temp_id,
+                    is_draft=True,
                 )
             return response
 
     def download(self, request, b64_string):
-        decoded_path = base64.b64decode(b64_string).decode("utf-8")
-        file_path = convert_file_relative_path_to_absolute_path(decoded_path)
+        try:
+            decoded_path = base64.b64decode(b64_string).decode("utf-8")
+            file_path = convert_file_relative_path_to_absolute_path(decoded_path)
+        except Exception as e:
+            return HttpResponse(status=status.HTTP_404_NOT_FOUND)
 
         if not os.path.exists(file_path):
             raise Http404
-        
+
         # If the requested path is a directory, create a zip file and return it
         if os.path.isdir(file_path):
             with tempfile.NamedTemporaryFile(suffix=".zip", delete=True) as temp_zip:
                 with zipfile.ZipFile(temp_zip, "w", zipfile.ZIP_DEFLATED) as zipf:
                     for root, dirs, files in os.walk(file_path):
                         for file in files:
-                            zipf.write(os.path.join(root, file), os.path.relpath(os.path.join(root, file), file_path))
+                            zipf.write(
+                                os.path.join(root, file),
+                                os.path.relpath(os.path.join(root, file), file_path),
+                            )
 
                 response = StreamingHttpResponse(
                     FileWrapper(
@@ -503,7 +672,9 @@ class FileViewSet(ProcessView, PatchView, viewsets.ViewSet):
                     content_type="application/zip",
                 )
                 response["Content-Length"] = os.path.getsize(temp_zip.name)
-                response["Content-Disposition"] = f"attachment; filename={os.path.basename(file_path)}.zip"
+                response["Content-Disposition"] = (
+                    f"attachment; filename={os.path.basename(file_path)}.zip"
+                )
                 return response
 
         filename = os.path.basename(file_path)

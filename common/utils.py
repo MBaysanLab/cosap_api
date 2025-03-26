@@ -1,14 +1,19 @@
 import os
 import re
+import shutil
 from datetime import datetime
 
 from celery.result import AsyncResult
 from django.conf import settings
 from django.core.mail import send_mail
-from django.db.models import Q
+from django.db.models import Q, Case, When, IntegerField
+from django.db import transaction, DataError, models
 from django.template.loader import render_to_string
-import shutil
+import json
+from tempfile import NamedTemporaryFile
+from logging import getLogger
 
+logger = getLogger(__name__)
 
 
 def levenshtein(s1, s2):
@@ -32,6 +37,53 @@ def levenshtein(s1, s2):
         previous_row = current_row
 
     return previous_row[-1]
+
+
+def is_fastq_pair(pair1: str, pair2: str) -> bool:
+    """
+    Check if two fastq filenames represent a valid pair.
+
+    Typical fastq pair naming conventions include:
+    - sample_R1.fastq.gz and sample_R2.fastq.gz
+    - sample_1.fastq.gz and sample_2.fastq.gz
+    - sample_forward.fastq.gz and sample_reverse.fastq.gz
+
+    Args:
+        pair1: Filename of the first fastq file
+        pair2: Filename of the second fastq file
+
+    Returns:
+        True if the files appear to be proper pairs, False otherwise
+    """
+    # Common patterns for paired-end naming
+    r1_patterns = ["_R1", "_1", "_forward", "_read1"]
+    r2_patterns = ["_R2", "_2", "_reverse", "_read2"]
+
+    # Check if pairs have the same base name
+    found_pair = False
+
+    for r1, r2 in zip(r1_patterns, r2_patterns):
+        # Check if pair1 has R1 pattern and pair2 has matching R2 pattern
+        if r1 in pair1 and r2 in pair2:
+            # Get the parts before and after the pattern
+            base1 = pair1.split(r1)[0]
+            base2 = pair2.split(r2)[0]
+
+            # If the base names match, it's a valid pair
+            if base1 == base2:
+                found_pair = True
+                break
+
+        # Check the reverse (pair1 has R2, pair2 has R1)
+        elif r2 in pair1 and r1 in pair2:
+            base1 = pair1.split(r2)[0]
+            base2 = pair2.split(r1)[0]
+
+            if base1 == base2:
+                found_pair = True
+                break
+
+    return found_pair
 
 
 def match_read_pairs(file_list: list) -> list[tuple]:
@@ -181,16 +233,17 @@ def convert_file_relative_path_to_absolute_path(file_path: str) -> str:
 
 
 def send_verification_email(user, verification_link):
-    subject = 'Verify your email address'
+    subject = "Verify your email address"
     context = {
-        'first_name': user.first_name,
-        'verification_link': verification_link,
+        "first_name": user.first_name,
+        "verification_link": verification_link,
     }
-    message = render_to_string('emails/verification_email.html', context)
+    message = render_to_string("emails/verification_email.html", context)
     from_email = settings.DEFAULT_FROM_EMAIL
     recipient_list = [user.email]
-    
+
     send_mail(subject, message, from_email, recipient_list, html_message=message)
+
 
 def remove_dir(directory):
     try:
@@ -210,3 +263,168 @@ def remove_dir(directory):
                 except Exception as e:
                     print(f"Error removing directory {name}: {e}")
         os.rmdir(directory)
+    finally:
+        print(f"Removed {directory}")
+
+
+def order_variants_by_acmg_severity(queryset):
+    """
+    Orders a variant queryset by ACMG classification severity
+    """
+    return queryset.annotate(
+        severity_order=Case(
+            When(intervar_classification="Pathogenic", then=1),
+            When(intervar_classification="Likely pathogenic", then=2),
+            When(intervar_classification="Uncertain significance", then=3),
+            When(intervar_classification="Likely benign", then=4),
+            When(intervar_classification="Benign", then=5),
+            default=6,
+            output_field=IntegerField(),
+        )
+    ).order_by("severity_order", "gene_symbol")
+
+
+def write_message_file(data):
+    """Write data to a file in the shared mounted directory."""
+
+    tmp_file = NamedTemporaryFile(
+        suffix=".json", dir=settings.MEDIA_TMP, delete=False, mode="w"
+    )
+    with tmp_file as f:
+        if isinstance(data, (dict, list)):
+            json.dump(data, f)
+        else:
+            f.write(str(data))
+    return tmp_file.name
+
+
+def read_message_file(filepath):
+    """Read data from a file in the shared mounted directory."""
+    if not os.path.exists(filepath):
+        return None
+
+    with open(filepath, "r") as f:
+        try:
+            data = json.load(f)
+            logger.info(f"Loaded JSON from file {filepath}.")
+            return data
+        except json.JSONDecodeError:
+            logger.info(f"Failed to load JSON from file {filepath}.")
+            # If not JSON, return as string
+            f.seek(0)
+            return f.read()
+
+
+def delete_message_file(filepath):
+    """Delete a file from the shared mounted directory."""
+    if os.path.exists(filepath):
+        os.remove(filepath)
+
+
+def safe_bulk_create(
+    model_class, objects_to_create, batch_size=1000, ignore_conflicts=False
+):
+    """
+    A generalized bulk_create function that handles field length validation and error reporting.
+
+    Args:
+        model_class (Model): The Django model class
+        objects_to_create (list): List of model instances to create
+        batch_size (int): Size of batches for creation
+        ignore_conflicts (bool): Whether to ignore unique constraint conflicts
+
+    Returns:
+        tuple: (created_objects_count, invalid_objects)
+    """
+    if not objects_to_create:
+        return 0, []
+
+    # Get field information from model
+    varchar_fields = {}
+    for field in model_class._meta.fields:
+        if isinstance(field, models.CharField):
+            varchar_fields[field.name] = field.max_length
+
+    # Validate field lengths before bulk creation
+    invalid_objects = []
+    valid_objects = []
+
+    for obj in objects_to_create:
+        has_invalid_field = False
+        invalid_fields = []
+
+        # Check string field lengths
+        for field_name, max_length in varchar_fields.items():
+            value = getattr(obj, field_name, None)
+            if isinstance(value, str) and len(value) > max_length:
+                has_invalid_field = True
+                invalid_fields.append(
+                    {
+                        "field": field_name,
+                        "actual_length": len(value),
+                        "max_length": max_length,
+                        "value_preview": (
+                            value[:50] + "..." if len(value) > 50 else value
+                        ),
+                    }
+                )
+
+        if has_invalid_field:
+            invalid_objects.append({"object": obj, "invalid_fields": invalid_fields})
+        else:
+            valid_objects.append(obj)
+
+    # Report invalid objects
+    for invalid in invalid_objects:
+        obj = invalid["object"]
+        obj_id = getattr(obj, "id", None) or getattr(obj, "pk", None) or str(obj)
+        logger.error(f"Invalid object found: {obj_id}")
+
+        for field_info in invalid["invalid_fields"]:
+            logger.error(
+                f"Field '{field_info['field']}' exceeds max length: "
+                f"{field_info['actual_length']} > {field_info['max_length']}"
+            )
+            logger.error(f"Value preview: {field_info['value_preview']}")
+
+    # Bulk create valid objects in batches
+    created_count = 0
+
+    try:
+        with transaction.atomic():
+            for i in range(0, len(valid_objects), batch_size):
+                batch = valid_objects[i : i + batch_size]
+                try:
+                    created_objects = model_class.objects.bulk_create(
+                        batch, ignore_conflicts=ignore_conflicts
+                    )
+                    created_count += len(created_objects)
+                except DataError as e:
+                    logger.error(f"Error in batch {i//batch_size}: {e}")
+                    raise  # Raise the exception to rollback the transaction
+
+    except DataError:
+        # Fall back to creating records individually to identify problematic records
+        for i in range(0, len(valid_objects), batch_size):
+            batch = valid_objects[i : i + batch_size]
+            for j, obj in enumerate(batch):
+                try:
+                    obj.save()
+                    created_count += 1
+                except DataError as e:
+                    logger.error(f"Error in record {i+j}: {e}")
+                    # Print all string field values for this record
+                    for field_name, max_length in varchar_fields.items():
+                        value = getattr(obj, field_name, None)
+                        if isinstance(value, str):
+                            logger.info(
+                                f" Field '{field_name}': length={len(value)}, max={max_length}"
+                            )
+                            if len(value) > max_length:
+                                logger.info(f" Value preview: {value[:50]}...")
+
+    except Exception as e:
+        logger.error(f"Transaction failed: {str(e)}")
+        raise
+
+    return created_count, invalid_objects

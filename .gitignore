@@ -182,4 +182,4 @@ static/
 
 # Django log files
 *.log
-log.django
+log.django.DS_Store

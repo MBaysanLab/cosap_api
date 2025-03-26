@@ -8,19 +8,25 @@ from django.dispatch import receiver
 from django_drf_filepond.models import TemporaryUpload, TemporaryUploadChunked
 from rest_framework.authtoken.models import Token
 
+from common.utils import remove_dir
+
 from .constants import FileExtensions, ProjectStatus
 from .helpers.model_helpers import get_updated_model_fields
-from .helpers.project_helpers import get_project_dir, project_files_ready
-from .helpers.task_helpers import (submit_cosap_parse_project_data,
-                                   submit_cosap_annotation_task,
-                                   submit_cosap_dna_task)
+from .helpers.project_helpers import get_project_dir, are_project_files_ready
+from .helpers.task_helpers import (
+    submit_cosap_annotation_task,
+    submit_cosap_dna_task,
+    submit_cosap_parse_project_data,
+)
 from .helpers.user_helpers import get_user_files_dir
 from .models import Action, File, Project, Report
-from common.utils import remove_dir
+import logging
 
 ACTION_TYPE_PROJECT_CREATED = "PC"
 ACTION_TYPE_FILE_UPLOADED = "FU"
 ACTION_TYPE_REPORT_CREATED = "RC"
+
+logger = logging.getLogger(__name__)
 
 @receiver(post_save, sender=settings.AUTH_USER_MODEL)
 def create_auth_token(sender, instance=None, created=False, **kwargs):
@@ -50,27 +56,6 @@ def auto_delete_project_dir_on_delete(sender, instance, **kwargs):
     """
     project_dir = get_project_dir(instance.id)
     remove_dir(project_dir)
-
-
-@receiver(post_save, sender=File)
-def auto_extract_file_extension(sender, instance, created, **kwargs):
-    """
-    Extracts file extension from file name.
-    """
-    if instance.name:
-        path = PurePosixPath(instance.name)
-        suffixes = [suffix[1:] for suffix in path.suffixes]
-
-        extensions_dict = {
-            member.name: member.value for member in FileExtensions.__members__.values()
-        }
-        found_type = FileExtensions.UNKNOWN.value
-        for file_type, extensions in extensions_dict.items():
-            if set(extensions).intersection(suffixes):
-                found_type = file_type
-                break
-
-        File.objects.filter(id=instance.id).update(file_type=found_type)
 
 
 @receiver(post_save, sender=Project)
@@ -128,6 +113,7 @@ def create_project_dir(sender, instance, created, **kwargs):
         if not os.path.isdir(project_dir):
             os.makedirs(project_dir)
 
+
 @receiver(post_save, sender=Project)
 def create_project_summary(sender, instance, created, **kwargs):
     """
@@ -135,6 +121,7 @@ def create_project_summary(sender, instance, created, **kwargs):
     """
     if created:
         from .models import ProjectSummary
+
         ProjectSummary.objects.create(project=instance)
 
 
@@ -142,13 +129,17 @@ def create_project_summary(sender, instance, created, **kwargs):
 @receiver(post_save, sender=Project)
 def submit_cosap_dna_job(sender, instance, created, **kwargs):
     # Submit COSAP DNA job when project is created
-
+    logger.info(f"Project {instance.id} created. Submitting COSAP DNA job.")
     if instance.is_draft:
         return
-    
+
     if created:
-        if project_files_ready(instance.id):
+        if are_project_files_ready(instance.id):
             submit_cosap_dna_task(instance.id)
+        else:
+            logger.info(
+                f"Project {instance.id} files are not ready. Skipping COSAP DNA job."
+            )
 
 
 @receiver(post_save, sender=Project)
@@ -158,7 +149,13 @@ def submit_cosap_parse_project_data_job(sender, instance, created, **kwargs):
     """
     if not created:
         updated_fields = get_updated_model_fields(Project, instance, ["status"])
-        if "status" in updated_fields and instance.status == ProjectStatus.PARSING.value:
+        if (
+            "status" in updated_fields
+            and instance.status == ProjectStatus.PARSING.value
+        ):
             submit_cosap_parse_project_data(instance.id)
-        elif "status" in updated_fields and instance.status == ProjectStatus.PENDING.value:
+        elif (
+            "status" in updated_fields
+            and instance.status == ProjectStatus.PENDING.value
+        ):
             submit_cosap_dna_task(instance.id)
