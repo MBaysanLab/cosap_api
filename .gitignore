@@ -183,7 +183,6 @@ static/
 # Django log files
 *.log
 log.django*
-log.django.DS_Store
 
 .fuse_hidden*
 .DS_Store
