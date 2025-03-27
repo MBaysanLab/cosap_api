@@ -166,7 +166,7 @@ cython_debug/
 *.rdb
 
 ### Django ###
-*.log*
+*.log
 *.pot
 *.pyc
 __pycache__/
@@ -182,6 +182,7 @@ static/
 
 # Django log files
 *.log
+log.django*
 log.django.DS_Store
 
 .fuse_hidden*
