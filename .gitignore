@@ -175,14 +175,12 @@ db.sqlite3
 db.sqlite3-journal
 media
 migrations/
+*.log
+log.django
+.fuse_hidden*
 
 # filepond files
 filepond_temp_files/
 static/
 
-# Django log files
-*.log
-log.django*
-
-.fuse_hidden*
 .DS_Store
