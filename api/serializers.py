@@ -1,10 +1,12 @@
 from django.contrib.auth import authenticate, get_user_model, password_validation
 from django.urls import reverse
+from django.utils.http import urlsafe_base64_encode
+from django.utils.encoding import force_bytes
 from rest_framework import serializers
 from rest_framework.authtoken.models import Token
 
 from api.models import Action, Affiliation, File, Project, Sample
-from common.utils import send_verification_email
+from common.utils import send_verification_email, email_verification_token
 
 USER = get_user_model()
 
@@ -29,6 +31,7 @@ class UserSerializer(serializers.ModelSerializer):
             "last_login",
             "date_joined",
             "affiliations",
+            "is_email_verified",
         ]
         read_only_fields = ["last_login", "date_joined"]
 
@@ -60,7 +63,6 @@ class RegistrationSerializer(serializers.ModelSerializer):
             "first_name": {"required": True},
             "last_name": {"required": True},
             "affiliations": {"required": False},
-
         }
 
     def create(self, data):
@@ -77,9 +79,13 @@ class RegistrationSerializer(serializers.ModelSerializer):
         user.set_password(data["password"])
         user.save()
 
-        # Generate verification link
+        # Generate verification link with secure token
         if not user.is_guest:
-            verification_link = reverse("verify-email", args=[user.pk])
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+            token = email_verification_token.make_token(user)
+            verification_link = reverse(
+                "verify-email", kwargs={"uidb64": uid, "token": token}
+            )
             send_verification_email(user, verification_link)
 
         return user

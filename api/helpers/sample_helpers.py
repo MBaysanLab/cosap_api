@@ -3,10 +3,11 @@ from common.utils import is_fastq_pair, safe_bulk_create
 from ..constants import FileExtensions, VCFHeaders
 
 
-def get_sample_fastq_pairs(sample):
+def get_sample_fastq_pairs(sample_id):
     """
     Returns the fastq pairs of the sample.
     """
+    sample = Sample.objects.get(id=sample_id)
     sample_files = sample.files.all()
     fastq_files = [f for f in sample_files if f.file_type == FileExtensions.FASTQ.value]
 

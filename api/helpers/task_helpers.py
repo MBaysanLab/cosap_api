@@ -36,88 +36,58 @@ def submit_cosap_dna_task(project_id: int):
     project_type = get_project_type(project_id)
     logger.info(f"Submitting COSAP DNA task for project {project_id}")
     # Validate and get sample data based on project type
-    sample_data = get_sample_files_for_project_type(project_id, project_type)
+    sample_data = get_sample_files(project_id)
     if sample_data is None:
         logger.error("Failed to get sample data for project.")
         return
 
+    fastq_pairs = defaultdict(list)
     for sample_id in sample_data:
-        for vcf_file in sample_data[sample_id][FileExtensions.VCF.name]:
+        if sample_data[sample_id]["file_type"] == FileExtensions.VCF.name:
+            # If the sample is a VCF file, we need to parse it
             logger.info(f"Submitting VCF parse task for sample {sample_id}")
             # Submit VCF parse task
             submit_vcf_parse_task(
-                vcf_path=vcf_file,
+                vcf_path=sample_data[sample_id]["files"],
                 sample_name=None,
                 caller_type=None,
                 sample_id=sample_id,
             )
 
-    # # Create task inputs for FASTQ analysis
-    # task_inputs = create_dna_task_inputs(project_id, project_type, sample_data)
+        elif sample_data[sample_id]["file_type"] == FileExtensions.FASTQ.name:
+            if sample_data[sample_id]["sample_type"] == Sampletypes.NORMAL.value:
+                normal_pair = sample_data[sample_id]["files"]
+                sample_data["normal_pairs"].append(normal_pair)
+            elif sample_data[sample_id]["sample_type"] == Sampletypes.TUMOR.value:
+                tumor_pair = sample_data[sample_id]["files"]
+                sample_data["tumor_pairs"].append(tumor_pair)
 
-    # # Submit task based on project type
-    # submit_dna_tasks(project_id, project_type, task_inputs)
-
-    # # Set project status to running
-    # set_project_status(project_id, ProjectStatus.RUNNING.value)
-
-
-def get_sample_files_for_project_type(project_id: int, project_type: str):
-    """
-    Validates and retrieves sample data for the given project type.
-    Returns None if validation fails, otherwise returns sample data.
-    """
-    if project_type == ProjectTypes.GERMLINE.value:
-        return get_germline_samples(project_id)
-    elif project_type == ProjectTypes.SOMATIC.value:
-        return get_somatic_samples(project_id)
-    elif project_type == ProjectTypes.GERMLINE_TRIO.value:
-        return get_trio_sample_files(project_id)
+    # Create task inputs for FASTQ analysis
+    if project_type == ProjectTypes.GERMLINE_TRIO.value:
+        # For trio, submit all normal samples separately
+        for normal_pair in sample_data["normal_pairs"]:
+            task_inputs = create_dna_task_inputs(
+                project_id, project_type, {"normal_pair": normal_pair}
+            )
+            # Submit task
+            submit_dna_tasks(project_id, project_type, task_inputs)
     else:
-        logger.error(f"Invalid project type: {project_type}")
-        set_project_status(project_id, ProjectStatus.FAILED.value)
-        return None
-
-
-def get_germline_samples(project_id: int):
-    """
-    Retrieves normal sample files for germline analysis.
-    """
-    all_samples = get_project_samples(project_id)
-    if len(all_samples) == 0:
-        set_project_stderr(project_id, "No samples found. Please provide samples.")
-        set_project_status(project_id, ProjectStatus.FAILED.value)
-
-        return None
-
-    sample_files = defaultdict(lambda: defaultdict(list))
-    for sample in all_samples:
-        sample_files[sample.id][sample.get_sample_file_type()].extend(
-            [file.file.path for file in sample.files.all()]
+        # For somatic or germline, submit all normal samples together
+        task_inputs = create_dna_task_inputs(
+            project_id,
+            project_type,
+            {
+                "normal_pair": sample_data["normal_pairs"],
+                "tumor_pair": sample_data["tumor_pairs"],
+            },
         )
+        # Submit task
+        submit_dna_tasks(project_id, project_type, task_inputs)
 
-    return sample_files
-
-
-def get_somatic_samples(project_id: int):
-    """
-    Retrieves tumor and normal sample files for somatic analysis.
-    """
-    all_samples = get_project_samples(project_id)
-    if len(all_samples) == 0:
-        set_project_stderr(project_id, "No samples found. Please provide samples.")
-        set_project_status(project_id, ProjectStatus.FAILED.value)
-
-        return None
-
-    sample_files = defaultdict(lambda: defaultdict(list))
-    for sample in all_samples:
-        sample_files[sample.id][sample.get_sample_file_type()].extend(
-            [file.file.path for file in sample.files.all()]
-        )
+    set_project_status(project_id, ProjectStatus.RUNNING.value)
 
 
-def get_trio_sample_files(project_id: int):
+def get_sample_files(project_id: int):
     """
     Retrieves trio sample files (child, mother, father) for germline trio analysis.
     """
@@ -128,11 +98,27 @@ def get_trio_sample_files(project_id: int):
 
         return None
 
-    sample_files = defaultdict(lambda: defaultdict(list))
+    sample_files = defaultdict(lambda: defaultdict(dict))
     for sample in all_samples:
-        sample_files[sample.id][sample.get_sample_file_type()].extend(
-            [file.file.path for file in sample.files.all()]
-        )
+        sample_files[sample.id]["sample_type"] = sample.sample_type
+        sample_files[sample.id]["file_type"] = sample.get_sample_file_type()
+
+        # Get VCF files
+        if sample.get_sample_file_type() == FileExtensions.VCF.name:
+            sample_files[sample.id]["files"] = sample.files.first()
+
+        # Get FASTQ files
+        elif sample.get_sample_file_type() == FileExtensions.FASTQ.name:
+            fastq_pair = get_sample_fastq_pairs(sample.id)
+            if fastq_pair:
+                sample_files[sample.id]["files"] = fastq_pair
+            else:
+                set_project_stderr(
+                    project_id,
+                    f"Sample {sample.id} has an invalid FASTQ pair.",
+                )
+                set_project_status(project_id, ProjectStatus.FAILED.value)
+                return None
 
     return sample_files
 
@@ -159,31 +145,12 @@ def create_dna_task_inputs(project_id: int, project_type: str, sample_data):
         ],
     }
 
-    if project_type in [ProjectTypes.GERMLINE.value, ProjectTypes.SOMATIC.value]:
-        base_inputs.update(
-            {
-                CosapDnaTaskInputs.NORMAL_SAMPLE.value: sample_data.get("normal_pair"),
-                CosapDnaTaskInputs.TUMOR_SAMPLES.value: sample_data.get("tumor_pair"),
-            }
-        )
-        return base_inputs
-    elif project_type == ProjectTypes.GERMLINE_TRIO.value:
-        # For trio, we'll return a list of task inputs, one for each family member
-        trio_inputs = []
-        for member_pair in [
-            sample_data.get("child_pair"),
-            sample_data.get("father_pair"),
-            sample_data.get("mother_pair"),
-        ]:
-            member_input = base_inputs.copy()
-            member_input.update(
-                {
-                    CosapDnaTaskInputs.NORMAL_SAMPLE.value: member_pair,
-                    CosapDnaTaskInputs.TUMOR_SAMPLES.value: None,
-                }
-            )
-            trio_inputs.append(member_input)
-        return trio_inputs
+    base_inputs.update(
+        {
+            CosapDnaTaskInputs.NORMAL_SAMPLE.value: sample_data.get("normal_pair"),
+            CosapDnaTaskInputs.TUMOR_SAMPLES.value: sample_data.get("tumor_pair"),
+        }
+    )
 
     return base_inputs
 

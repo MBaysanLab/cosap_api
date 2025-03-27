@@ -8,11 +8,12 @@ router = DefaultRouter()
 router.register(r"users", views.UserViewSet, basename="user")
 router.register(r"login", views.AuthTokenViewSet, basename="login")
 router.register(r"register", views.RegisterViewSet, basename="register")
-router.register(r"get_user", views.VerifyUserVeiwSet, basename="get_user")
 router.register(r"projects", views.ProjectViewSet, basename="project")
 router.register(r"actions", views.ActionViewSet, basename="action")
 router.register(r"variants", views.ProjectSNVViewset, basename="project_variants")
 router.register(r"samples", views.SampleViewSet, basename="sample")
+router.register(r"get_user", views.UserAuthViewSet, basename="get_user")
+router.register(r"auth", views.UserAuthViewSet, basename="auth")
 
 urlpatterns = [
     path("", include(router.urls)),
@@ -28,16 +29,11 @@ urlpatterns = [
     re_path(
         r"file/(?P<b64_string>.+)/?$", views.FileViewSet.as_view({"get": "download"})
     ),
-    path("change_password/", views.VerifyUserVeiwSet.as_view({"put": "update"})),
+    path("change_password/", views.UserAuthViewSet.as_view({"put": "update"})),
+    path(
+        "verify-email/<uidb64>/<token>/",
+        views.UserAuthViewSet.as_view({"get": "verify_email_token"}),
+        name="verify-email",
+    ),
     re_path(r"igv/(?P<b64_string>.+)/?$", views.IGVDataView.as_view()),
-    path(
-        "verify-email/",
-        views.VerifyUserVeiwSet.as_view({"post": "verify_email"}),
-        name="verify-email",
-    ),
-    path(
-        "verify-email/<int:user_id>/",
-        views.VerifyUserVeiwSet.as_view({"post": "verify_email"}),
-        name="verify-email",
-    ),
 ]

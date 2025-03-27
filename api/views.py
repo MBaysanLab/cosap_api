@@ -30,6 +30,8 @@ from rest_framework.decorators import action, api_view
 from rest_framework.parsers import MultiPartParser
 from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
+from django.utils.http import urlsafe_base64_decode
+from django.utils.encoding import force_str
 
 from api import serializers
 from api.models import (
@@ -52,6 +54,7 @@ from common.utils import (
     convert_file_relative_path_to_absolute_path,
     create_chonky_filemap,
     order_variants_by_acmg_severity,
+    email_verification_token,
 )
 from .helpers.project_helpers import (
     get_project_dir,
@@ -89,9 +92,20 @@ class UserViewSet(
     queryset = USER.objects.all()
 
 
-class VerifyUserVeiwSet(viewsets.ViewSet):
+class UserAuthViewSet(viewsets.ViewSet):
     """
-    View to verify user with token and get email.
+    Viewset for managing authenticated user operations.
+
+    This viewset handles token verification, password management, and email verification
+    operations for existing users. It does not handle initial authentication (login)
+    or user registration.
+
+    Endpoints:
+    - POST /auth/ - Verify a token and get user information
+    - PUT /auth/ - Change a user's password
+    - POST /auth/check_email_exists/ - Check if an email exists
+    - GET /verify-email/<uidb64>/<token>/ - Verify a user's email with token
+    - POST /auth/resend_verification/ - Resend verification email
     """
 
     authentication_classes = []
@@ -100,6 +114,16 @@ class VerifyUserVeiwSet(viewsets.ViewSet):
     queryset = USER.objects.all()
 
     def create(self, request):
+        """
+        Verify an authentication token and return user information.
+
+        This endpoint accepts an Authorization header with a token and returns
+        the associated user's information if the token is valid.
+
+        Returns:
+          200 OK with user data if token is valid
+          404 Not Found if token is invalid or not provided
+        """
         token = (
             request.headers["Authorization"].split()[1]
             if "Authorization" in request.headers
@@ -115,7 +139,15 @@ class VerifyUserVeiwSet(viewsets.ViewSet):
 
     def update(self, request):
         """
-        Change password
+        Change a user's password.
+
+        Requires a valid token in the Authorization header and both old_password
+        and new_password in the request data.
+
+        Returns:
+          200 OK if password changed successfully
+          401 Unauthorized if old password is incorrect
+          404 Not Found if token is invalid or not provided
         """
         request_token = (
             request.headers["Authorization"].split()[1]
@@ -134,7 +166,18 @@ class VerifyUserVeiwSet(viewsets.ViewSet):
         return Response(status=status.HTTP_404_NOT_FOUND)
 
     @action(detail=False, methods=["post"])
-    def verify_email(self, request):
+    def check_email_exists(self, request):
+        """
+        Check if an email address exists in the system.
+
+        Accepts a POST request with an 'email' field and returns
+        the email if it exists in the system.
+
+        Returns:
+          200 OK with email if it exists
+          404 Not Found if email does not exist
+          400 Bad Request if email is not provided
+        """
         email = request.data.get("email")
         if not email:
             return Response(
@@ -146,33 +189,149 @@ class VerifyUserVeiwSet(viewsets.ViewSet):
             return Response({"email": user.email}, status=status.HTTP_200_OK)
         return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
 
+    @action(detail=False, methods=["get"])
+    def verify_email_token(self, request, uidb64=None, token=None):
+        """
+        Verify a user's email address using a secure token.
+
+        This endpoint is accessed via an email verification link. It validates
+        the provided token and user ID, then marks the user's email as verified.
+
+        The token is time-limited and becomes invalid after use.
+
+        Args:
+            uidb64: Base64-encoded user ID
+            token: Secure verification token
+
+        Returns:
+          200 OK if email verified successfully
+          400 Bad Request if the verification link is invalid or expired
+        """
+        try:
+            uid = force_str(urlsafe_base64_decode(uidb64))
+            user = get_user_model().objects.get(pk=uid)
+        except (TypeError, ValueError, OverflowError, get_user_model().DoesNotExist):
+            user = None
+
+        if user is not None and email_verification_token.check_token(user, token):
+            user.is_email_verified = True
+            user.save()
+            return Response(
+                {"detail": "Email verified successfully"}, status=status.HTTP_200_OK
+            )
+        else:
+            return Response(
+                {"detail": "Invalid verification link"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    @action(detail=False, methods=["post"])
+    def resend_verification(self, request):
+        """
+        Resend verification email to a registered user.
+        
+        This endpoint accepts an email address and sends a new verification
+        email with a fresh token if the user exists and is not already verified.
+        
+        Returns:
+          200 OK if email was sent successfully
+          400 Bad Request if email is already verified or not provided
+          404 Not Found if user with provided email doesn't exist
+        """
+        email = request.data.get("email")
+        if not email:
+            return Response(
+                {"error": "Email is required"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        try:
+            user = USER.objects.get(email=email)
+            
+            # Check if email is already verified
+            if user.is_email_verified:
+                return Response(
+                    {"error": "Email is already verified"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+                
+            # Generate new verification link with secure token
+            from django.urls import reverse
+            from django.utils.http import urlsafe_base64_encode
+            from django.utils.encoding import force_bytes
+            from common.utils import email_verification_token, send_verification_email
+            
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+            token = email_verification_token.make_token(user)
+            verification_link = reverse(
+                "verify-email", kwargs={"uidb64": uid, "token": token}
+            )
+            
+            # Send verification email
+            send_verification_email(user, verification_link)
+            
+            return Response(
+                {"detail": "Verification email sent successfully"}, 
+                status=status.HTTP_200_OK
+            )
+            
+        except USER.DoesNotExist:
+            return Response(
+                {"error": "User not found"}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+
 
 class AuthTokenViewSet(ObtainAuthToken, viewsets.ViewSet):
     """
-    View to get auth token given username and password.
+    Viewset for obtaining authentication tokens (login).
+
+    This viewset handles the initial authentication process. It accepts
+    username/password credentials and returns an authentication token
+    that can be used for subsequent requests.
+
+    This viewset extends Django REST Framework's ObtainAuthToken class
+    and adds email verification checking.
+
+    Endpoints:
+    - POST /api/token/ - Obtain an authentication token
     """
 
     authentication_classes = []
     permission_classes = [permissions.AllowAny]
 
     def create(self, request, *args, **kwargs):
+        """
+        Authenticate a user and return an authentication token.
+
+        Accepts username and password credentials and validates them.
+        Also checks that the user's email is verified before issuing a token.
+
+        Returns:
+          200 OK with token if authentication succeeds
+          400 Bad Request if credentials are invalid or email is not verified
+        """
         serializer = self.serializer_class(
             data=request.data, context={"request": request}
         )
         serializer.is_valid(raise_exception=True)
         user = serializer.validated_data["user"]
-        if not user.is_email_verified:
-            return Response(
-                {"error": "Email not verified. Please verify your email to log in."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
         token, created = Token.objects.get_or_create(user=user)
         return Response({"token": token.key})
 
 
 class RegisterViewSet(mixins.CreateModelMixin, viewsets.GenericViewSet):
     """
-    View to register a user (also logs the user in).
+    Viewset for registering new users.
+
+    This viewset handles new user registration. It creates a new user record,
+    sends a verification email, and returns an authentication token.
+
+    Note that the returned token may not be usable for authentication
+    until the user verifies their email address.
+
+    Endpoints:
+    - POST /api/register/ - Register a new user
     """
 
     authentication_classes = []
@@ -182,13 +341,24 @@ class RegisterViewSet(mixins.CreateModelMixin, viewsets.GenericViewSet):
     serializer_class = serializers.RegistrationSerializer
 
     def create(self, request, *args, **kwargs):
+        """
+        Register a new user.
+
+        Creates a new user record with the provided information and returns
+        an authentication token. For non-guest users, this also sends a
+        verification email that must be completed before the user can log in.
+
+        Returns:
+          200 OK with token if registration succeeds
+          400 Bad Request if the registration data is invalid
+        """
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
 
         user = USER.objects.get(id=serializer.instance.id)
-
         token = Token.objects.get(user=user)
+
         return Response({"token": token.key})
 
 
@@ -376,20 +546,22 @@ class ProjectSNVViewset(viewsets.ViewSet):
             try:
                 # Get the ProjectSamples instance for this project
                 project_samples = ProjectSample.objects.filter(project=project).first()
-                
+
                 if not project_samples:
                     logger.error(f"No samples found for project with id {pk}")
                     return Response(status=status.HTTP_404_NOT_FOUND)
-                
+
                 # Get the proband (child) sample that has mother or father relationships
                 sample = project_samples.samples.filter(
                     Q(mother__isnull=False) | Q(father__isnull=False)
                 ).first()
-                
+
                 if not sample:
-                    logger.error(f"Proband sample for project with id {pk} does not exist")
+                    logger.error(
+                        f"Proband sample for project with id {pk} does not exist"
+                    )
                     return Response(status=status.HTTP_404_NOT_FOUND)
-                    
+
             except ProjectSample.DoesNotExist:
                 logger.error(f"ProjectSamples for project with id {pk} does not exist")
                 return Response(status=status.HTTP_404_NOT_FOUND)
@@ -401,7 +573,9 @@ class ProjectSNVViewset(viewsets.ViewSet):
                 sample=sample
             ).variants.all()
         except SampleSmallVariant.DoesNotExist:
-            logger.error(f"SampleSmallVariants for sample with id {sample.id} does not exist")
+            logger.error(
+                f"SampleSmallVariants for sample with id {sample.id} does not exist"
+            )
             return Response(status=status.HTTP_404_NOT_FOUND)
 
         # Get query parameters
@@ -440,7 +614,7 @@ class ProjectSNVViewset(viewsets.ViewSet):
                 variant_dict["sample_specific"] = model_to_dict(sample_snv_data)
             except SampleSmallVariantData.DoesNotExist:
                 variant_dict["sample_specific"] = {}
-            
+
             variant_dict["pedigree"] = defaultdict(dict)
             if sample.mother:
                 try:
@@ -458,7 +632,7 @@ class ProjectSNVViewset(viewsets.ViewSet):
                     variant_dict["pedigree"]["father"] = model_to_dict(father_snv_data)
                 except SampleSmallVariantData.DoesNotExist:
                     variant_dict["pedigree"]["father"]
-            
+
             variant_dict["variant"] = model_to_dict(snv.variant)
             page_variants.append(variant_dict)
 

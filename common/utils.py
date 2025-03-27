@@ -12,6 +12,9 @@ from django.template.loader import render_to_string
 import json
 from tempfile import NamedTemporaryFile
 from logging import getLogger
+from django.utils.http import urlsafe_base64_encode
+from django.utils.encoding import force_bytes
+from django.contrib.auth.tokens import PasswordResetTokenGenerator
 
 logger = getLogger(__name__)
 
@@ -230,6 +233,20 @@ def convert_file_relative_path_to_absolute_path(file_path: str) -> str:
     Converts relative path to absolute path.
     """
     return os.path.join(settings.MEDIA_ROOT, file_path)
+
+
+class EmailVerificationTokenGenerator(PasswordResetTokenGenerator):
+    """
+    Strategy object used to generate and check tokens for email verification.
+    """
+
+    def _make_hash_value(self, user, timestamp):
+        # Include email verification status in hash to invalidate
+        # token once email is verified
+        return str(user.pk) + str(timestamp) + str(user.is_email_verified)
+
+
+email_verification_token = EmailVerificationTokenGenerator()
 
 
 def send_verification_email(user, verification_link):
