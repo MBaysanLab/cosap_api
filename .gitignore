@@ -166,7 +166,7 @@ cython_debug/
 *.rdb
 
 ### Django ###
-*.log
+*.log*
 *.pot
 *.pyc
 __pycache__/
