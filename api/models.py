@@ -326,6 +326,13 @@ class Sample(models.Model):
         blank=True,
         related_name="mother_of",
     )
+    
+    siblings = models.ManyToManyField(
+        "self",
+        blank=True,
+        symmetrical=False,
+        related_name="siblings_of",
+    )
 
     files = models.ManyToManyField(File)
 

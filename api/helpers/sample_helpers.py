@@ -9,7 +9,7 @@ def get_sample_fastq_pairs(sample_id):
     """
     sample = Sample.objects.get(id=sample_id)
     sample_files = sample.files.all()
-    fastq_files = [f for f in sample_files if f.file_type == FileExtensions.FASTQ.value]
+    fastq_files = [f for f in sample_files if f.file_type == FileExtensions.FASTQ.name]
 
     if len(fastq_files) == 2 and is_fastq_pair(
         fastq_files[0].name, fastq_files[1].name

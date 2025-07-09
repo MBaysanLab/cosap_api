@@ -1,12 +1,11 @@
 import os
 
-# from .variant_helpers import create_snv
 import warnings
 
 from celery.result import AsyncResult
 from django.db.models import Q
 
-from ..constants import CosapDnaTaskInputs, ProjectAlgorithmKeys
+from ..constants import CosapDnaTaskInputs, ProjectAlgorithmKeys, ProjectTypes, ProjectTypes
 from ..models import (
     Project,
     ProjectFile,
@@ -49,6 +48,46 @@ def get_project_dir(project_id):
         raise Exception("Project does not exist.")
     return os.path.join(get_user_dir(project.user), f"{project.id}_{project.name}")
 
+def get_primary_sample(project):
+    """
+    Get the primary sample for analysis based on project type.
+    
+    Args:
+        project: Project instance
+        
+    Returns:
+        Sample instance or None if not found
+        
+    Raises:
+        ProjectSample.DoesNotExist: If no ProjectSample exists for the project
+    """
+    try:
+        project_samples = ProjectSample.objects.get(project=project)
+    except ProjectSample.DoesNotExist:
+        raise
+    
+    if project.project_type == ProjectTypes.GERMLINE.value:
+        sample = project_samples.samples.first()
+        if not sample:
+            return None
+    
+    elif project.project_type == ProjectTypes.SOMATIC.value:
+        sample = project_samples.samples.filter(sample_type=Sample.TUMOR).first()
+        if not sample:
+            return None
+    
+    elif project.project_type == ProjectTypes.GERMLINE_TRIO.value:
+        # Get the proband (child) sample that has mother or father relationships
+        sample = project_samples.samples.filter(
+            Q(mother__isnull=False) | Q(father__isnull=False)
+        ).first()
+        if not sample:
+            return None
+    
+    else:
+        return None
+    
+    return sample
 
 def update_project_variant_stats(project_id):
     """
@@ -82,41 +121,6 @@ def update_project_variant_stats(project_id):
     project_summary.save()
 
 
-def create_project_snvs(project_id, variant_list):
-    """
-    Creates SNV objects for a project.
-    """
-
-    project = Project.objects.get(id=project_id)
-    project_small_variants = SampleSmallVariant.objects.get_or_create(
-        project=project
-    )[0]
-
-    # Get snv list and create SNV objects. Check every field if they are in SNV model.
-    for variant in variant_list:
-        variant["variant_id"] = "_".join(
-            [
-                variant["CHROM"],
-                str(variant["POS"]),
-                variant["REF"],
-                variant["ALT"],
-            ],
-        )
-        svar = create_snv(variant["variant_id"])
-        project_small_variants.snvs.add(svar)
-
-        # Create ProjectSNVData object
-        SampleSmallVariantData.objects.create(
-            project=project,
-            variant=svar,
-            allele_frequency=variant.get("AF"),
-            allele_depth=variant.get("AD"),
-            read_depth=variant.get("DP"),
-        )
-
-    project_small_variants.save()
-
-
 def get_project_samples(project_id, sample_type=None):
     """
     Returns project samples.
@@ -143,12 +147,15 @@ def get_project_files(project_id, file_type=None):
     try:
         project_file_obj = ProjectFile.objects.get(project=project)
     except ProjectFile.DoesNotExist:
-        raise Exception("Project files do not exist.")
+        return None
     
-    if file_type:
-        files = list(project_file_obj.files.filter(file_type=file_type))
-    else:
-        files = list(project_file_obj.files.all())
+    try:
+        if file_type:
+            files = list(project_file_obj.files.filter(file_type=file_type))
+        else:
+            files = list(project_file_obj.files.all())
+    except ProjectFile.DoesNotExist:
+        return None
 
     return files
 

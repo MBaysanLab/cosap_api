@@ -57,32 +57,35 @@ def submit_cosap_dna_task(project_id: int):
         elif sample_data[sample_id]["file_type"] == FileExtensions.FASTQ.name:
             if sample_data[sample_id]["sample_type"] == Sampletypes.NORMAL.value:
                 normal_pair = sample_data[sample_id]["files"]
-                sample_data["normal_pairs"].append(normal_pair)
+                fastq_pairs["normal_pairs"].append(normal_pair)
             elif sample_data[sample_id]["sample_type"] == Sampletypes.TUMOR.value:
                 tumor_pair = sample_data[sample_id]["files"]
-                sample_data["tumor_pairs"].append(tumor_pair)
+                fastq_pairs["tumor_pairs"].append(tumor_pair)
 
     # Create task inputs for FASTQ analysis
     if project_type == ProjectTypes.GERMLINE_TRIO.value:
         # For trio, submit all normal samples separately
-        for normal_pair in sample_data["normal_pairs"]:
+        for normal_pair in fastq_pairs["normal_pairs"]:
             task_inputs = create_dna_task_inputs(
                 project_id, project_type, {"normal_pair": normal_pair}
             )
             # Submit task
             submit_dna_tasks(project_id, project_type, task_inputs)
     else:
-        # For somatic or germline, submit all normal samples together
-        task_inputs = create_dna_task_inputs(
-            project_id,
-            project_type,
-            {
-                "normal_pair": sample_data["normal_pairs"],
-                "tumor_pair": sample_data["tumor_pairs"],
-            },
-        )
-        # Submit task
-        submit_dna_tasks(project_id, project_type, task_inputs)
+        if len(fastq_pairs) > 0:
+            # For somatic or germline, submit all normal samples together
+            normal_pairs = fastq_pairs.get("normal_pairs", [])
+            tumor_pairs = fastq_pairs.get("tumor_pairs", [])
+            task_inputs = create_dna_task_inputs(
+                project_id,
+                project_type,
+                {
+                    "normal_pair": normal_pairs,
+                    "tumor_pair": tumor_pairs,
+                },
+            )
+            # Submit task
+            submit_dna_tasks(project_id, project_type, task_inputs)
 
     set_project_status(project_id, ProjectStatus.RUNNING.value)
 
@@ -105,7 +108,7 @@ def get_sample_files(project_id: int):
 
         # Get VCF files
         if sample.get_sample_file_type() == FileExtensions.VCF.name:
-            sample_files[sample.id]["files"] = sample.files.first()
+            sample_files[sample.id]["files"] = sample.files.first().file.path
 
         # Get FASTQ files
         elif sample.get_sample_file_type() == FileExtensions.FASTQ.name:
@@ -123,11 +126,15 @@ def get_sample_files(project_id: int):
     return sample_files
 
 
-def create_dna_task_inputs(project_id: int, project_type: str, sample_data):
+def create_dna_task_inputs(project_id: int, project_type: str, fastq_pairs):
     """
     Creates task input dictionary for DNA analysis.
     """
-    bed_file = get_project_files(project_id, FileExtensions.BED.value)[0].file.path
+    try:
+        bed_file = get_project_files(project_id, FileExtensions.BED.name)[0].file.path
+    except Exception as e:
+        bed_file = None
+
     algorithms = get_project_algorithms(project_id)
     workdir = get_project_dir(project_id)
 
@@ -147,8 +154,8 @@ def create_dna_task_inputs(project_id: int, project_type: str, sample_data):
 
     base_inputs.update(
         {
-            CosapDnaTaskInputs.NORMAL_SAMPLE.value: sample_data.get("normal_pair"),
-            CosapDnaTaskInputs.TUMOR_SAMPLES.value: sample_data.get("tumor_pair"),
+            CosapDnaTaskInputs.NORMAL_SAMPLE.value: fastq_pairs.get("normal_pair"),
+            CosapDnaTaskInputs.TUMOR_SAMPLES.value: fastq_pairs.get("tumor_pair"),
         }
     )
 
@@ -179,12 +186,12 @@ def submit_cosap_parse_project_data(project_id: int):
     return results
 
 
-def submit_cosap_annotation_task(variants: list, workdir: int):
+def submit_cosap_annotation_task(variants: list, workdir: int, **kwargs):
     """
     Submits a COSAP annotation task to Celery.
     """
 
-    results = cosap_annotation_task(variants, workdir)
+    results = cosap_annotation_task(variants, workdir, **kwargs)
 
     return results
 

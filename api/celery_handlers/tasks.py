@@ -40,15 +40,15 @@ def cosap_parse_project_data_task(path, project_id):
     return task
 
 
-def cosap_annotation_task(variant_list: list, workdir: str):
+def cosap_annotation_task(variant_list: list, workdir: str, **kwargs):
     """
     Sends variant list to cosap worker and retrieve annotated variants as dict.
     """
     task = celery_app.send_task(
         COSAPTasks.ANNOTATION_TASK.value,
         args=[variant_list, workdir],
-        link=on_annotation_task_success.s(),
-        link_error=on_annotation_task_failure.s(),
+        link=on_annotation_task_success.s(**kwargs),
+        link_error=on_annotation_task_failure.s(**kwargs),
     )
     return task
 

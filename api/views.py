@@ -60,6 +60,7 @@ from .helpers.project_helpers import (
     get_project_dir,
     remove_project_data_and_snvs,
     add_sample_to_project,
+    get_primary_sample,
 )
 from .constants import ProjectStatus, ProjectTypeAlgorithms, ProjectTypes
 from .elasticsearch_queries import filter_variants_by_annotation
@@ -229,10 +230,10 @@ class UserAuthViewSet(viewsets.ViewSet):
     def resend_verification(self, request):
         """
         Resend verification email to a registered user.
-        
+
         This endpoint accepts an email address and sends a new verification
         email with a fresh token if the user exists and is not already verified.
-        
+
         Returns:
           200 OK if email was sent successfully
           400 Bad Request if email is already verified or not provided
@@ -241,44 +242,42 @@ class UserAuthViewSet(viewsets.ViewSet):
         email = request.data.get("email")
         if not email:
             return Response(
-                {"error": "Email is required"}, 
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": "Email is required"}, status=status.HTTP_400_BAD_REQUEST
             )
-            
+
         try:
             user = USER.objects.get(email=email)
-            
+
             # Check if email is already verified
             if user.is_email_verified:
                 return Response(
                     {"error": "Email is already verified"},
-                    status=status.HTTP_400_BAD_REQUEST
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
-                
+
             # Generate new verification link with secure token
             from django.urls import reverse
             from django.utils.http import urlsafe_base64_encode
             from django.utils.encoding import force_bytes
             from common.utils import email_verification_token, send_verification_email
-            
+
             uid = urlsafe_base64_encode(force_bytes(user.pk))
             token = email_verification_token.make_token(user)
             verification_link = reverse(
                 "verify-email", kwargs={"uidb64": uid, "token": token}
             )
-            
+
             # Send verification email
             send_verification_email(user, verification_link)
-            
+
             return Response(
-                {"detail": "Verification email sent successfully"}, 
-                status=status.HTTP_200_OK
+                {"detail": "Verification email sent successfully"},
+                status=status.HTTP_200_OK,
             )
-            
+
         except USER.DoesNotExist:
             return Response(
-                {"error": "User not found"}, 
-                status=status.HTTP_404_NOT_FOUND
+                {"error": "User not found"}, status=status.HTTP_404_NOT_FOUND
             )
 
 
@@ -418,6 +417,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         child_sample_id = request.POST.get("child_sample_id")
         mother_sample_id = request.POST.get("mother_sample_id")
         father_sample_id = request.POST.get("father_sample_id")
+        proband2_sample_id = request.POST.get("proband2_sample_id")
 
         project_samples = ProjectSample.objects.create(project=new_project)
 
@@ -433,14 +433,18 @@ class ProjectViewSet(viewsets.ModelViewSet):
             child_sample = add_sample_to_project(project_samples, child_sample_id)
 
             mother_sample = add_sample_to_project(project_samples, mother_sample_id)
-            if mother_sample:
-                child_sample.mother = mother_sample
-                child_sample.save()
-
             father_sample = add_sample_to_project(project_samples, father_sample_id)
-            if father_sample:
-                child_sample.father = father_sample
-                child_sample.save()
+            sibling_sample = add_sample_to_project(project_samples, proband2_sample_id)
+
+            if sibling_sample:
+                child_sample.siblings.add(sibling_sample)
+                sibling_sample.siblings.add(child_sample)
+                sibling_sample.mother = mother_sample
+                sibling_sample.father = father_sample
+
+            child_sample.save()
+            sibling_sample.save()
+
         else:
             # No child, just add parents to the project
             add_sample_to_project(project_samples, mother_sample_id)
@@ -526,46 +530,12 @@ class ProjectSNVViewset(viewsets.ViewSet):
             logger.error(f"Project with id {pk} does not exist")
             return Response(status=status.HTTP_404_NOT_FOUND)
 
-        if project.project_type == ProjectTypes.GERMLINE.value:
-            try:
-                sample = (
-                    ProjectSample.objects.get(project=project).samples.all().first()
-                )
-            except ProjectSample.DoesNotExist:
-                logger.error(f"Germline sample for project with id {pk} does not exist")
+        # Get the primary sample for analysis
+        try:
+            sample = get_primary_sample(project)
+            if not sample:
                 return Response(status=status.HTTP_404_NOT_FOUND)
-        elif project.project_type == ProjectTypes.SOMATIC.value:
-            try:
-                sample = ProjectSample.objects.get(
-                    project=project, sample_type=Sample.TUMOR
-                )
-            except ProjectSample.DoesNotExist:
-                logger.error(f"Tumor sample for project with id {pk} does not exist")
-                return Response(status=status.HTTP_404_NOT_FOUND)
-        elif project.project_type == ProjectTypes.GERMLINE_TRIO.value:
-            try:
-                # Get the ProjectSamples instance for this project
-                project_samples = ProjectSample.objects.filter(project=project).first()
-
-                if not project_samples:
-                    logger.error(f"No samples found for project with id {pk}")
-                    return Response(status=status.HTTP_404_NOT_FOUND)
-
-                # Get the proband (child) sample that has mother or father relationships
-                sample = project_samples.samples.filter(
-                    Q(mother__isnull=False) | Q(father__isnull=False)
-                ).first()
-
-                if not sample:
-                    logger.error(
-                        f"Proband sample for project with id {pk} does not exist"
-                    )
-                    return Response(status=status.HTTP_404_NOT_FOUND)
-
-            except ProjectSample.DoesNotExist:
-                logger.error(f"ProjectSamples for project with id {pk} does not exist")
-                return Response(status=status.HTTP_404_NOT_FOUND)
-        else:
+        except ProjectSample.DoesNotExist:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
         try:
@@ -576,20 +546,33 @@ class ProjectSNVViewset(viewsets.ViewSet):
             logger.error(
                 f"SampleSmallVariants for sample with id {sample.id} does not exist"
             )
-            return Response(status=status.HTTP_404_NOT_FOUND)
+            return Response({"snvs": {}, "total": 0})
 
-        # Get query parameters
-        page = request.GET.get("page", 1)
-        page_size = request.GET.get("page_size", 25)
+        # Get and validate query parameters
+        try:
+            page = int(request.GET.get("page", 1))
+            page_size = min(int(request.GET.get("page_size", 25)), 100)  # Cap at 100
+            if page < 1 or page_size < 1:
+                raise ValueError()
+        except (ValueError, TypeError):
+            return Response(
+                {"error": "Invalid page or page_size parameter"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         filters = (
             request.GET.get("filters", "").split(",")
             if request.GET.get("filters")
             else []
         )
 
-        # Get filtered variants
-        variant_annotations = VariantAnnotation.objects.filter(
-            variant__in=sample_small_variants, vep_pick=True
+        # Get filtered variants with optimized queries
+        variant_annotations = (
+            VariantAnnotation.objects.filter(
+                variant__in=sample_small_variants, vep_pick=True
+            )
+            .select_related("variant")
+            .prefetch_related("variant__samplesmallvariantdata_set__sample")
         )
         variant_annotations_ids = variant_annotations.values_list("id", flat=True)
 
@@ -599,7 +582,6 @@ class ProjectSNVViewset(viewsets.ViewSet):
             )
 
         # Sort the variants based on intervar_classification from most severe to least severe
-        # Most severe: 'Pathogenic', 'Likely pathogenic', 'Uncertain significance', 'Likely benign', 'Benign'
         variant_annotations = order_variants_by_acmg_severity(variant_annotations)
 
         paginator = Paginator(variant_annotations, page_size)
@@ -615,24 +597,8 @@ class ProjectSNVViewset(viewsets.ViewSet):
             except SampleSmallVariantData.DoesNotExist:
                 variant_dict["sample_specific"] = {}
 
-            variant_dict["pedigree"] = defaultdict(dict)
-            if sample.mother:
-                try:
-                    mother_snv_data = SampleSmallVariantData.objects.get(
-                        variant=snv.variant, sample=sample.mother
-                    )
-                    variant_dict["pedigree"]["mother"] = model_to_dict(mother_snv_data)
-                except SampleSmallVariantData.DoesNotExist:
-                    variant_dict["pedigree"]["mother"]
-            if sample.father:
-                try:
-                    father_snv_data = SampleSmallVariantData.objects.get(
-                        variant=snv.variant, sample=sample.father
-                    )
-                    variant_dict["pedigree"]["father"] = model_to_dict(father_snv_data)
-                except SampleSmallVariantData.DoesNotExist:
-                    variant_dict["pedigree"]["father"]
-
+            # Build pedigree data
+            variant_dict["pedigree"] = self._build_pedigree_data(snv.variant, sample)
             variant_dict["variant"] = model_to_dict(snv.variant)
             page_variants.append(variant_dict)
 
@@ -643,6 +609,26 @@ class ProjectSNVViewset(viewsets.ViewSet):
                     variant[key] = str(value)
 
         return Response({"snvs": page_variants, "total": paginator.count})
+
+    def _build_pedigree_data(self, variant, sample):
+        """Build pedigree data for a variant."""
+        pedigree_data = defaultdict(dict)
+
+        for relation, related_sample in [
+            ("mother", sample.mother),
+            ("father", sample.father),
+            ("sibling", sample.siblings.first()),
+        ]:
+            if related_sample:
+                try:
+                    snv_data = SampleSmallVariantData.objects.get(
+                        variant=variant, sample=related_sample
+                    )
+                    pedigree_data[relation] = model_to_dict(snv_data)
+                except SampleSmallVariantData.DoesNotExist:
+                    pedigree_data[relation] = {}
+
+        return pedigree_data
 
 
 class IGVDataView(views.APIView):

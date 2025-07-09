@@ -31,6 +31,6 @@ RUN conda init bash
 RUN pip install uv
 RUN uv pip install Django==4.0 djangorestframework django-filter django-countries psycopg2-binary \
     django-cors-headers django-drf-filepond "celery[redis]" pysam sentry-sdk django-json-widget \
-    elasticsearch-dsl django-elasticsearch-dsl django-extensions ipython
+    elasticsearch-dsl django-elasticsearch-dsl django-extensions ipython legacy-cgi
 
 WORKDIR /webapi
