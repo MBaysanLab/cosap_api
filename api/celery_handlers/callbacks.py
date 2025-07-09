@@ -225,23 +225,24 @@ def on_parse_vcf_task_success(result, **kwargs):
     handle_parse_vcf_results_for_sample(variants, sample_id)
 
     non_annotated_variants = get_non_annotated_variants(variants)
+    project_id = get_samples_project_id(sample_id)
+    
+    if project_id is None:
+        logger.error(f"Cannot update project status: no project found for sample {sample_id}")
+        delete_message_file(result)
+        return
 
     if non_annotated_variants and ANNOTATE_VARIANTS:
         from ..helpers.task_helpers import submit_cosap_annotation_task
 
         non_annotated_variants_path = write_message_file(non_annotated_variants)
-        project_id = get_samples_project_id(sample_id)
         
-        if project_id is None:
-            logger.error(f"Cannot submit annotation task: no project found for sample {sample_id}")
-            delete_message_file(non_annotated_variants_path)
-            return
-            
         submit_cosap_annotation_task(non_annotated_variants_path, workdir=None)
         update_project_status(project_id, ProjectStatus.ANNOTATING, {})
     else:
         update_project_status(project_id, ProjectStatus.COMPLETED, {})
-        delete_message_file(result)
+        
+    delete_message_file(result)
 
 
 @celery_app.task
