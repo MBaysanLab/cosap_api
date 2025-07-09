@@ -23,6 +23,7 @@ from ..helpers.variant_helpers import (
 from common.utils import read_message_file, write_message_file, delete_message_file
 
 from ..models import Project, ProjectSample
+from ...cosap_api.settings import ANNOTATE_VARIANTS
 
 logger = logging.getLogger(__name__)
 
@@ -225,7 +226,7 @@ def on_parse_vcf_task_success(result, **kwargs):
 
     non_annotated_variants = get_non_annotated_variants(variants)
 
-    if non_annotated_variants:
+    if non_annotated_variants and ANNOTATE_VARIANTS:
         from ..helpers.task_helpers import submit_cosap_annotation_task
 
         non_annotated_variants_path = write_message_file(non_annotated_variants)
@@ -239,6 +240,7 @@ def on_parse_vcf_task_success(result, **kwargs):
         submit_cosap_annotation_task(non_annotated_variants_path, workdir=None)
         update_project_status(project_id, ProjectStatus.ANNOTATING, {})
     else:
+        update_project_status(project_id, ProjectStatus.COMPLETED, {})
         delete_message_file(result)
 
 

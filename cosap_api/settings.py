@@ -263,3 +263,5 @@ EMAIL_PORT = 1025
 EMAIL_USE_TLS = False
 EMAIL_USE_SSL = False
 DEFAULT_FROM_EMAIL = "webmaster@localhost"
+
+ANNOTATE_VARIANTS = os.environ.get("ANNOTATE_VARIANTS", "True") == "True"

@@ -302,16 +302,23 @@ def order_variants_by_acmg_severity(queryset):
 
 
 def write_message_file(data):
-    """Write data to a file in the shared mounted directory."""
-
+    """Write data to a file in a temporary subdirectory within the shared mounted directory."""
+    import tempfile
+    
+    # Create a temporary directory within MEDIA_TMP
+    tmp_dir = tempfile.mkdtemp(dir=settings.MEDIA_TMP)
+    
+    # Create the temporary file within the temporary directory
     tmp_file = NamedTemporaryFile(
-        suffix=".json", dir=settings.MEDIA_TMP, delete=False, mode="w"
+        suffix=".json", dir=tmp_dir, delete=False, mode="w"
     )
+    
     with tmp_file as f:
         if isinstance(data, (dict, list)):
             json.dump(data, f)
         else:
             f.write(str(data))
+    
     return tmp_file.name
 
 
