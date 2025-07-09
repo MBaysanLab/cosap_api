@@ -23,7 +23,7 @@ from ..helpers.variant_helpers import (
 from common.utils import read_message_file, write_message_file, delete_message_file
 
 from ..models import Project, ProjectSample
-from ...cosap_api.settings import ANNOTATE_VARIANTS
+from cosap_api.settings import ANNOTATE_VARIANTS
 
 logger = logging.getLogger(__name__)
 
