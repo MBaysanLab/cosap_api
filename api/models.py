@@ -364,6 +364,9 @@ class SampleSmallVariantData(models.Model):
     allele_depth = models.IntegerField(null=True, blank=True)
     read_depth = models.IntegerField(null=True, blank=True)
 
+    class Meta:
+        unique_together = ['variant', 'sample']
+
     def __str__(self) -> str:
         return f"{self.sample.id}_{self.sample.name} - small variant data"
 
