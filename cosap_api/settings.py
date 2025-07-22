@@ -32,7 +32,7 @@ SECRET_KEY = os.environ["COSAP_DJANGO_SECRET"]
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get("COSAP_DJANGO_DEBUG") == "True"
 
-ALLOWED_HOSTS = ["localhost"] + json.loads(os.environ.get("COSAP_BIO_HOST", "[]"))
+ALLOWED_HOSTS = ["localhost", "web"] + json.loads(os.environ.get("COSAP_BIO_HOST", "[]"))
 
 CSRF_TRUSTED_ORIGINS = [os.environ.get("COSAP_CORS_TRUSTED_ORIGINS")]
 
@@ -67,9 +67,11 @@ INSTALLED_APPS = [
     "django_json_widget",
     "django_elasticsearch_dsl",
     "api",
+    "django_prometheus",
 ]
 
 MIDDLEWARE = [
+    "django_prometheus.middleware.PrometheusBeforeMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -78,6 +80,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "django_prometheus.middleware.PrometheusAfterMiddleware",
 ]
 
 ROOT_URLCONF = "cosap_api.urls"
@@ -117,7 +120,7 @@ AUTH_USER_MODEL = "api.CustomUser"
 
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.postgresql",
+        "ENGINE": "django_prometheus.db.backends.postgresql",
         "NAME": os.environ.get("COSAP_DB_NAME", "postgres"),
         "USER": os.environ.get("COSAP_DB_USER", "postgres"),
         "PASSWORD": os.environ.get("COSAP_DB_PASSWORD", "postgres"),

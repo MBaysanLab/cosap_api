@@ -29,8 +29,9 @@ RUN conda init bash
 
 # Install web API requirements
 RUN pip install uv
-RUN uv pip install Django==4.0 djangorestframework django-filter django-countries psycopg2-binary \
+RUN uv pip install Django==4.2 djangorestframework django-filter django-countries psycopg2-binary \
     django-cors-headers django-drf-filepond "celery[redis]" pysam sentry-sdk django-json-widget \
-    elasticsearch-dsl django-elasticsearch-dsl django-extensions ipython legacy-cgi
+    elasticsearch-dsl django-elasticsearch-dsl django-extensions ipython legacy-cgi django-prometheus \
+    prometheus-client
 
 WORKDIR /webapi

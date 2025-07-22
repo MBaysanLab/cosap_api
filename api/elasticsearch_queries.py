@@ -98,7 +98,6 @@ def filter_variants_by_annotation(
             )
             query_field = field_info["query_field"]
             query_type = field_info["query_type"]
-            print(f"Processing filter: {query_field} with type {query_type} and value {query_value}")
 
             # Handle range queries for gnomad_af
             if query_type == "range":

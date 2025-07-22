@@ -13,7 +13,7 @@ from ..constants import (
     ProjectTypes,
     Sampletypes,
 )
-from ..models import Project, ProjectFile
+from ..models import Project, ProjectFile, Sample, SampleReferenceGenome
 from .project_helpers import (
     get_project_algorithms,
     get_project_dir,
@@ -46,12 +46,15 @@ def submit_cosap_dna_task(project_id: int):
         if sample_data[sample_id]["file_type"] == FileExtensions.VCF.name:
             # If the sample is a VCF file, we need to parse it
             logger.info(f"Submitting VCF parse task for sample {sample_id}")
-            # Submit VCF parse task
+
+            sample = Sample.objects.get(id=sample_id)
+            reference_genome = SampleReferenceGenome.objects.get(sample=sample).reference_genome
             submit_vcf_parse_task(
                 vcf_path=sample_data[sample_id]["files"],
                 sample_name=None,
                 caller_type=None,
                 sample_id=sample_id,
+                reference_genome=reference_genome,
             )
 
         elif sample_data[sample_id]["file_type"] == FileExtensions.FASTQ.name:
@@ -201,6 +204,7 @@ def submit_vcf_parse_task(
     caller_type: str,
     sample_id: int,
     sample_name: str = None,
+    reference_genome: str = "hg38",
 ):
     """
     Submits a COSAP annotation task to Celery.
@@ -211,6 +215,7 @@ def submit_vcf_parse_task(
         caller_type=caller_type,
         sample_name=sample_name,
         sample_id=sample_id,
+        reference_genome=reference_genome,
     )
 
     return results

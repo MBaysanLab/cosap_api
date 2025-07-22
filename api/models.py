@@ -128,8 +128,8 @@ class ProjectQCSummary(models.Model):
 class SmallVariant(models.Model):
     chrom = models.CharField(max_length=256)
     pos = models.IntegerField()
-    ref = models.CharField(max_length=256)
-    alt = models.CharField(max_length=256)
+    ref = models.CharField(max_length=512)
+    alt = models.CharField(max_length=512)
     variant_id = models.CharField(max_length=1024, unique=True)
 
     class Meta:
@@ -370,6 +370,18 @@ class SampleSmallVariantData(models.Model):
     def __str__(self) -> str:
         return f"{self.sample.id}_{self.sample.name} - small variant data"
 
+class SampleReferenceGenome(models.Model):
+    sample = models.ForeignKey(Sample, on_delete=models.CASCADE)
+    reference_genome = models.CharField(
+        choices=[
+            ("hg19", "hg19"),
+            ("hg38", "hg38"),
+        ],
+        default="hg38",
+    )
+
+    def __str__(self):
+        return f"{self.sample.name} - reference"
 
 class ProjectSample(models.Model):
     project = models.ForeignKey(Project, on_delete=models.CASCADE)

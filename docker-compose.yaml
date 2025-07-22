@@ -15,6 +15,7 @@ services:
     env_file:
       - .env
     working_dir: /user_files
+
   db:
     image: postgres:latest
     volumes:
@@ -27,6 +28,7 @@ services:
     ports:
       - "5432:5432"
     command: bash -c "chown -R postgres:postgres /var/lib/postgresql/data && docker-entrypoint.sh postgres"
+
   web:
     build: ./docker
     command:
@@ -45,7 +47,9 @@ services:
       - .env
     depends_on:
       - db
+      - prometheus
     restart: unless-stopped
+
   celeryworker:
     build: ./docker
     command: celery -A cosap_api worker -l INFO
@@ -59,12 +63,14 @@ services:
       - redis
       - rabbitmq
     restart: unless-stopped
+
   redis:
     image: redis
     expose:
       - "6379"
     ports:
       - "6379:6379"
+
   rabbitmq:
     image: rabbitmq:3-management
     ports:
@@ -74,6 +80,7 @@ services:
       - RABBITMQ_DEFAULT_VHOST=vhost
       - RABBITMQ_DEFAULT_USER=guest
       - RABBITMQ_DEFAULT_PASS=guest
+
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.17.2
     ports:
@@ -87,10 +94,111 @@ services:
     volumes:
       - elasticsearchdata:/usr/share/elasticsearch/data
     restart: unless-stopped
-  mailhog:
-    image: mailhog/mailhog
+
+  # Monitoring Stack Integration
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: cosap-prometheus
     ports:
-      - "1025:1025"
-      - "8025:8025"
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=90d'
+      - '--storage.tsdb.retention.size=20GB'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+      - '--storage.tsdb.wal-compression'
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: cosap-grafana
+    ports:
+      - "3001:3000" 
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin123}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-worldmap-panel
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: cosap-node-exporter
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    restart: unless-stopped
+
+  # Exporters for existing services
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: cosap-postgres-exporter
+    ports:
+      - "9187:9187"
+    environment:
+      - DATA_SOURCE_NAME=postgresql://${COSAP_DB_USER}:${COSAP_DB_PASSWORD}@db:5432/${COSAP_DB_NAME}?sslmode=disable
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    container_name: cosap-redis-exporter
+    ports:
+      - "9121:9121"
+    environment:
+      - REDIS_ADDR=redis://redis:6379
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  rabbitmq-exporter:
+    image: kbudde/rabbitmq-exporter:latest
+    container_name: cosap-rabbitmq-exporter
+    ports:
+      - "9419:9419"
+    environment:
+      - RABBIT_URL=http://rabbitmq:15672
+      - RABBIT_USER=guest
+      - RABBIT_PASSWORD=guest
+    depends_on:
+      - rabbitmq
+    restart: unless-stopped
+
+  elasticsearch-exporter:
+    image: prometheuscommunity/elasticsearch-exporter:latest
+    container_name: cosap-elasticsearch-exporter
+    ports:
+      - "9114:9114"
+    command:
+      - '--es.uri=http://elasticsearch:9200'
+      - '--es.all'
+      - '--es.indices'
+      - '--es.cluster_settings'
+    depends_on:
+      - elasticsearch
+    restart: unless-stopped
+
 volumes:
   elasticsearchdata:
+  prometheus_data:
+  grafana_data:

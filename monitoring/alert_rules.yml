@@ -1,0 +1,132 @@
+groups:
+  - name: cosap_api_alerts
+    rules:
+      # High error rate alerts
+      - alert: HighTaskErrorRate
+        expr: rate(cosap_task_errors_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High task error rate detected"
+          description: "Task error rate is {{ $value }} errors per second for the last 5 minutes"
+
+      - alert: CriticalTaskErrorRate
+        expr: rate(cosap_task_errors_total[5m]) > 0.5
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical task error rate detected"
+          description: "Task error rate is {{ $value }} errors per second for the last 5 minutes"
+
+      # Job queue monitoring
+      - alert: HighQueueSize
+        expr: cosap_queue_size > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High queue size detected"
+          description: "Queue {{ $labels.queue_name }} has {{ $value }} pending jobs"
+
+      - alert: CriticalQueueSize
+        expr: cosap_queue_size > 500
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical queue size detected"
+          description: "Queue {{ $labels.queue_name }} has {{ $value }} pending jobs"
+
+      # Job duration monitoring
+      - alert: SlowJobExecution
+        expr: histogram_quantile(0.95, rate(cosap_job_duration_seconds_bucket[10m])) > 3600
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Slow job execution detected"
+          description: "95th percentile job duration for {{ $labels.job_type }} is {{ $value }} seconds"
+
+      # API performance alerts
+      - alert: HighAPILatency
+        expr: histogram_quantile(0.95, rate(cosap_api_request_duration_seconds_bucket[5m])) > 5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API latency detected"
+          description: "95th percentile API latency is {{ $value }} seconds"
+
+      - alert: HighAPIErrorRate
+        expr: rate(cosap_api_request_duration_seconds_count{status_code=~"5.."}[5m]) / rate(cosap_api_request_duration_seconds_count[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API error rate detected"
+          description: "API error rate is {{ $value | humanizePercentage }}"
+
+  - name: system_alerts
+    rules:
+      # Memory usage alerts
+      - alert: HighMemoryUsage
+        expr: cosap_memory_usage_bytes / (1024^3) > 8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage detected"
+          description: "Component {{ $labels.component }} is using {{ $value }} GB of memory"
+
+      # Disk usage alerts
+      - alert: HighDiskUsage
+        expr: (cosap_disk_usage_bytes{usage_type="used"} / cosap_disk_usage_bytes{usage_type="total"}) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High disk usage detected"
+          description: "Disk usage on {{ $labels.mount_point }} is {{ $value | humanizePercentage }}"
+
+      - alert: CriticalDiskUsage
+        expr: (cosap_disk_usage_bytes{usage_type="used"} / cosap_disk_usage_bytes{usage_type="total"}) > 0.9
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical disk usage detected"
+          description: "Disk usage on {{ $labels.mount_point }} is {{ $value | humanizePercentage }}"
+
+  - name: service_availability
+    rules:
+      # Service availability
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "Service {{ $labels.job }} has been down for more than 1 minute"
+
+      # Database connectivity
+      - alert: DatabaseConnectionIssues
+        expr: rate(cosap_database_query_duration_seconds_count[5m]) == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Database connection issues detected"
+          description: "No database queries recorded in the last 5 minutes"
+
+      # Worker availability
+      - alert: NoActiveWorkers
+        expr: cosap_active_workers == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No active Celery workers"
+          description: "No active workers detected for {{ $labels.worker_type }}"

@@ -21,6 +21,18 @@ from ..helpers.variant_helpers import (
     handle_annotation_results,
 )
 from common.utils import read_message_file, write_message_file, delete_message_file
+from ..metrics import (
+    project_status_changes_total,
+    cosap_dna_job_submissions_total,
+    cosap_parse_job_submissions_total,
+    cosap_annotation_job_submissions_total,
+    file_processing_duration,
+    cosap_job_duration,
+    task_errors_total,
+    cosap_queue_size,
+    pending_jobs_count
+)
+import time
 
 from ..models import Project, ProjectSample
 from cosap_api.settings import ANNOTATE_VARIANTS
@@ -64,7 +76,7 @@ def get_samples_project_id(sample_id: str) -> str:
         return None
 
 def update_project_status(
-    project_id: str, status: ProjectStatus, result: dict[str, Any] = None
+    project_id: str, status: ProjectStatus, result = None
 ) -> None:
     """
     Update project status and output information.
@@ -72,25 +84,56 @@ def update_project_status(
     Args:
         project_id: The ID of the project to update
         status: The new status to set
-        result: Dictionary containing stderr and stdout (optional)
+        result: Dictionary, string error message, or Celery result object
     """
     if result is None:
         result = {}
+    
+    # Handle different result types
+    if isinstance(result, str):
+        result_dict = {"stderr": result, "returncode": 1}
+    elif hasattr(result, 'result') and hasattr(result, 'traceback'):
+        # Celery task result object
+        stderr_parts = []
+        if result.result:
+            stderr_parts.append(f"Error: {str(result.result)}")
+        if result.traceback:
+            stderr_parts.append(f"Traceback: {result.traceback}")
+        
+        result_dict = {
+            "stderr": "\n".join(stderr_parts) if stderr_parts else "Task failed",
+            "returncode": 1
+        }
+    elif isinstance(result, dict):
+        result_dict = result
+    else:
+        result_dict = {"stderr": str(result), "returncode": 1}
+    
+    logger.info("Result dictionary for project update: %s", result_dict)
         
     try:
         project = Project.objects.get(id=project_id)
+        old_status = project.status
         # Handle both enum and string values
-        project.status = status.value if hasattr(status, 'value') else status
-        project.stderr = result.get("stderr", "")
-        project.stdout = result.get("stdout", "")
+        new_status = status.value if hasattr(status, 'value') else status
+        project.status = new_status
+        project.stderr = result_dict.get("stderr", "")
+        project.stdout = result_dict.get("stdout", "")
         project.save()
 
+        # Track status changes
+        if old_status != new_status:
+            project_status_changes_total.labels(
+                from_status=old_status,
+                to_status=new_status
+            ).inc()
+
         logger.info(
-            f"Updated project {project_id} status to {status.value if hasattr(status, 'value') else status}",
+            f"Updated project {project_id} status to {new_status}",
             extra={
                 "project_id": project_id,
-                "status": status.value if hasattr(status, 'value') else status,
-                "returncode": result.get("returncode"),
+                "status": new_status,
+                "returncode": result_dict.get("returncode"),
             },
         )
     except Project.DoesNotExist:
@@ -111,7 +154,8 @@ def on_dna_pipeline_task_success(result, **kwargs):
     """
     Handles the results of the COSAP DNA pipeline task.
     """
-
+    start_time = time.time()
+    
     project_id = kwargs.get("project_id")
     if not project_id:
         logger.error("Missing project_id in task kwargs")
@@ -122,20 +166,35 @@ def on_dna_pipeline_task_success(result, **kwargs):
         if result.get("returncode") == 0
         else ProjectStatus.FAILED
     )
+    
+    # Track DNA job completion with enhanced labels
+    project_type = kwargs.get("project_type", "unknown")
+    cosap_dna_job_submissions_total.labels(
+        status='success' if status == ProjectStatus.COMPLETED else 'failed',
+        project_type=project_type
+    ).inc()
+    
+    # Track job duration
+    duration = time.time() - start_time
+    cosap_job_duration.labels(job_type='dna').observe(duration)
+    
     update_project_status(project_id, status, result)
 
 
 @celery_app.task
 @handle_task_errors
-def on_dna_pipeline_task_failure(result, **kwargs):
+def on_dna_pipeline_task_failure(task_id, **kwargs):
     """
     Handles the failure of the COSAP DNA pipeline task.
     """
-
+    result = celery_app.AsyncResult(task_id)
     project_id = kwargs.get("project_id")
     if not project_id:
         logger.error("Missing project_id in task kwargs")
         return
+    
+    # Track DNA job failure
+    cosap_dna_job_submissions_total.labels(status='failed').inc()
         
     update_project_status(project_id, ProjectStatus.FAILED, result)
 
@@ -146,13 +205,13 @@ def on_parse_task_success(result, **kwargs):
     """
     Handles the success of the parse project task.
     """
-
+    start_time = time.time()
     project_id = kwargs.get("project_id")
-    if not project_id:
-        logger.error("Missing project_id in task kwargs")
-        return
-        
+    
     try:
+        # Track parse job success
+        cosap_parse_job_submissions_total.labels(status='success').inc()
+        
         variants_json = result.get(ParseProjectResultsKeys.VARIANTS.value)
         if not variants_json or not os.path.exists(variants_json):
             logger.error(f"Variants JSON file not found: {variants_json}")
@@ -187,7 +246,15 @@ def on_parse_task_success(result, **kwargs):
         # Clean up the original variants file
         delete_message_file(variants_json)
         
+        # Track job duration
+        duration = time.time() - start_time
+        cosap_job_duration.labels(job_type='parse').observe(duration)
+        
     except Exception as e:
+        # Track errors for Grafana error dashboards
+        task_errors_total.labels(task_type='parse', error_type=type(e).__name__).inc()
+        cosap_parse_job_submissions_total.labels(status='failed').inc()
+        
         logger.error(f"Error processing parse task results: {str(e)}", 
                     extra={"project_id": project_id, "error": str(e)})
         update_project_status(project_id, ProjectStatus.FAILED, 
@@ -196,11 +263,11 @@ def on_parse_task_success(result, **kwargs):
 
 @celery_app.task
 @handle_task_errors
-def on_parse_task_failure(result, **kwargs):
+def on_parse_task_failure(task_id, **kwargs):
     """
     Handles the failure of the parse project task.
     """
-
+    result = celery_app.AsyncResult(task_id)
     project_id = kwargs.get("project_id")
     if not project_id:
         logger.error("Missing project_id in task kwargs")
@@ -215,55 +282,96 @@ def on_parse_vcf_task_success(result, **kwargs):
     """
     Handles the success of the parse VCF task.
     """
-
     sample_id = kwargs.get("sample_id")
     if not sample_id:
         logger.error("Missing sample_id in task kwargs")
+        task_errors_total.labels(task_type='parse_vcf', error_type='MissingSampleId').inc()
         return
 
-    variants = read_message_file(result)
-    handle_parse_vcf_results_for_sample(variants, sample_id)
-
-    non_annotated_variants = get_non_annotated_variants(variants)
-    project_id = get_samples_project_id(sample_id)
-    
-    if project_id is None:
-        logger.error(f"Cannot update project status: no project found for sample {sample_id}")
-        delete_message_file(result)
-        return
-
-    if non_annotated_variants and ANNOTATE_VARIANTS:
-        from ..helpers.task_helpers import submit_cosap_annotation_task
-
-        non_annotated_variants_path = write_message_file(non_annotated_variants)
+    project_id = None
+    try:
+        # Read variants from result file
+        variants = read_message_file(result)
+        if not variants:
+            logger.warning(f"No variants found in result file for sample {sample_id}")
+            return
+            
+        # Process variants for sample
+        handle_parse_vcf_results_for_sample(variants, sample_id)
         
-        submit_cosap_annotation_task(non_annotated_variants_path, workdir=None)
-        update_project_status(project_id, ProjectStatus.ANNOTATING, {})
-    else:
-        update_project_status(project_id, ProjectStatus.COMPLETED, {})
+        # Get project ID
+        project_id = get_samples_project_id(sample_id)
+        if project_id is None:
+            logger.error(f"Cannot update project status: no project found for sample {sample_id}")
+            task_errors_total.labels(task_type='parse_vcf', error_type='ProjectNotFound').inc()
+            return
+
+        # Handle annotation if needed
+        non_annotated_variants = get_non_annotated_variants(variants)
         
-    delete_message_file(result)
+        if non_annotated_variants and ANNOTATE_VARIANTS:
+            try:
+                from ..helpers.task_helpers import submit_cosap_annotation_task
+
+                non_annotated_variants_path = write_message_file(non_annotated_variants)
+                
+                # Track annotation job submission
+                cosap_annotation_job_submissions_total.labels(status='submitted').inc()
+                
+                submit_cosap_annotation_task(non_annotated_variants_path, workdir=None, project_id=project_id)
+                update_project_status(project_id, ProjectStatus.ANNOTATING, {})
+                
+            except Exception as e:
+                logger.error(f"Failed to submit annotation task for project {project_id}: {str(e)}")
+                cosap_annotation_job_submissions_total.labels(status='failed').inc()
+                task_errors_total.labels(task_type='parse_vcf', error_type='AnnotationSubmissionFailed').inc()
+                update_project_status(project_id, ProjectStatus.FAILED, {"stderr": f"Annotation submission failed: {str(e)}"})
+        else:
+            update_project_status(project_id, ProjectStatus.COMPLETED, {})
+            
+    except Exception as e:
+        logger.error(f"Error in parse VCF success callback: {str(e)}", 
+                    extra={"sample_id": sample_id, "project_id": project_id, "error": str(e)})
+        task_errors_total.labels(task_type='parse_vcf', error_type=type(e).__name__).inc()
+        
+        if project_id:
+            update_project_status(project_id, ProjectStatus.FAILED, {"stderr": f"Parse VCF callback error: {str(e)}"})
+            
+    finally:
+        try:
+            delete_message_file(result)
+        except Exception as e:
+            logger.warning(f"Failed to delete message file {result}: {str(e)}")
 
 
 @celery_app.task
 @handle_task_errors
-def on_parse_vcf_task_failure(result, **kwargs):
+def on_parse_vcf_task_failure(task_id, **kwargs):
     """
     Handles the failure of the parse VCF task.
     """
 
+    result = celery_app.AsyncResult(task_id)
     sample_id = kwargs.get("sample_id")
     if not sample_id:
         logger.error("Missing sample_id in task kwargs")
+        task_errors_total.labels(task_type='parse_vcf', error_type='MissingSampleId').inc()
         return
-        
-    project_id = get_samples_project_id(sample_id)
     
-    if project_id is None:
-        logger.error(f"Cannot update project status: no project found for sample {sample_id}")
-        return
+    try:
+        project_id = get_samples_project_id(sample_id)
+        if project_id is None:
+            logger.error(f"Cannot update project status: no project found for sample {sample_id}")
+            task_errors_total.labels(task_type='parse_vcf', error_type='ProjectNotFound').inc()
+            return
+            
+        task_errors_total.labels(task_type='parse_vcf', error_type='TaskFailed').inc()
+        update_project_status(project_id, ProjectStatus.FAILED, result)
         
-    update_project_status(project_id, ProjectStatus.FAILED, result)
+    except Exception as e:
+        logger.error(f"Error in parse VCF failure callback: {str(e)}", 
+                    extra={"sample_id": sample_id, "error": str(e)})
+        task_errors_total.labels(task_type='parse_vcf', error_type=type(e).__name__).inc()
 
 
 @celery_app.task
@@ -272,29 +380,61 @@ def on_annotation_task_success(result, **kwargs):
     """
     Handles the results of the COSAP annotation task.
     """
-
+    project_id = kwargs.get("project_id")
+    
     try:
+        # Read and process annotation results
         annotated_variants = read_message_file(result)
+        if not annotated_variants:
+            logger.warning(f"No annotated variants found in result file for project {project_id}")
+            cosap_annotation_job_submissions_total.labels(status='success').inc()
+            if project_id:
+                update_project_status(project_id, ProjectStatus.COMPLETED, {})
+            return
+            
         handle_annotation_results(annotated_variants)
         
-        project_id = kwargs.get("project_id")
+        # Track successful annotation
+        cosap_annotation_job_submissions_total.labels(status='success').inc()
+        
         if project_id:
             update_project_status(project_id, ProjectStatus.COMPLETED, {})
+            
+    except Exception as e:
+        logger.error(f"Error processing annotation results: {str(e)}", 
+                    extra={"project_id": project_id, "error": str(e)})
+        task_errors_total.labels(task_type='annotation', error_type=type(e).__name__).inc()
+        cosap_annotation_job_submissions_total.labels(status='failed').inc()
+        
+        if project_id:
+            update_project_status(project_id, ProjectStatus.FAILED, {"stderr": f"Annotation processing failed: {str(e)}"})
+            
     finally:
-        # Always clean up the message file
-        delete_message_file(result)
+        try:
+            delete_message_file(result)
+        except Exception as e:
+            logger.warning(f"Failed to delete message file {result}: {str(e)}")
 
 
 @celery_app.task
 @handle_task_errors
-def on_annotation_task_failure(result, **kwargs):
+def on_annotation_task_failure(task_id, **kwargs):
     """
     Handles the failure of the COSAP annotation task.
     """
-
+    result = celery_app.AsyncResult(task_id)
     project_id = kwargs.get("project_id")
     if not project_id:
         logger.error("Missing project_id in task kwargs")
+        task_errors_total.labels(task_type='annotation', error_type='MissingProjectId').inc()
         return
+    
+    try:
+        task_errors_total.labels(task_type='annotation', error_type='TaskFailed').inc()
+        cosap_annotation_job_submissions_total.labels(status='failed').inc()
+        update_project_status(project_id, ProjectStatus.FAILED, result)
         
-    update_project_status(project_id, ProjectStatus.FAILED, result)
+    except Exception as e:
+        logger.error(f"Error in annotation failure callback: {str(e)}", 
+                    extra={"project_id": project_id, "error": str(e)})
+        task_errors_total.labels(task_type='annotation', error_type=type(e).__name__).inc()

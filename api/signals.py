@@ -20,6 +20,19 @@ from .helpers.task_helpers import (
 )
 from .helpers.user_helpers import get_user_files_dir
 from .models import Action, File, Project, Report
+from .metrics import (
+    user_creation_total,
+    project_creation_total,
+    file_upload_total,
+    report_creation_total,
+    cosap_dna_job_submissions_total,
+    cosap_parse_job_submissions_total,
+    project_status_changes_total,
+    project_deletion_total,
+    file_deletion_total,
+    temp_upload_completion_total,
+    active_projects_count,
+)
 import logging
 
 ACTION_TYPE_PROJECT_CREATED = "PC"
@@ -35,6 +48,8 @@ def create_auth_token(sender, instance=None, created=False, **kwargs):
     """
     if created:
         Token.objects.create(user=instance)
+        # Increment user creation metric
+        user_creation_total.inc()
 
 
 @receiver(post_delete, sender=File)
@@ -46,6 +61,9 @@ def auto_delete_file_on_delete(sender, instance, **kwargs):
     if instance.file:
         if os.path.isfile(instance.file.path):
             os.remove(instance.file.path)
+    
+    # Increment file deletion metric
+    file_deletion_total.inc()
 
 
 @receiver(pre_delete, sender=Project)
@@ -56,6 +74,13 @@ def auto_delete_project_dir_on_delete(sender, instance, **kwargs):
     """
     project_dir = get_project_dir(instance.id)
     remove_dir(project_dir)
+    
+    # Increment project deletion metric
+    project_deletion_total.inc()
+    
+    # Update active projects count - use actual project_type values
+    project_type = instance.project_type if instance.project_type else 'unknown'
+    active_projects_count.labels(project_type=project_type).set(Project.objects.filter(is_draft=False).count())
 
 
 @receiver(post_save, sender=Project)
@@ -78,6 +103,23 @@ def auto_create_action(sender, instance, created, **kwargs):
             action_detail=str(instance),
         )
 
+    # Update metrics based on instance type
+    if isinstance(instance, Project):
+        status = 'draft' if instance.is_draft else 'active'
+        user_type = 'admin' if instance.user.is_staff else 'regular'
+        project_creation_total.labels(status=status, user_type=user_type).inc()
+        # Update active projects count - use actual project_type values
+        project_type = instance.project_type if instance.project_type else 'unknown'
+        active_projects_count.labels(project_type=project_type).set(Project.objects.filter(is_draft=False).count())
+    elif isinstance(instance, File):
+        file_ext = instance.name.split('.')[-1] if instance.name and '.' in instance.name else 'unknown'
+        # Determine file type based on extension
+        file_type = 'vcf' if file_ext.lower() in ['vcf'] else 'fastq' if file_ext.lower() in ['fastq', 'fq'] else 'other'
+        file_upload_total.labels(file_extension=file_ext, file_type=file_type).inc()
+    elif isinstance(instance, Report):
+        report_type = 'standard'  # You may want to determine this based on actual report type
+        report_creation_total.labels(report_type=report_type).inc()
+
 
 @receiver(post_delete, sender=TemporaryUploadChunked)
 def save_tmp_upload(sender, instance, **kwargs):
@@ -99,7 +141,12 @@ def save_tmp_upload(sender, instance, **kwargs):
         fl.file = permanent_file_path
         fl.is_draft = False
         fl.save()
+        
+        # Increment successful temp upload completion
+        temp_upload_completion_total.labels(status='success').inc()
     except File.DoesNotExist:
+        # Increment failed temp upload completion
+        temp_upload_completion_total.labels(status='failure').inc()
         pass
 
 
@@ -136,10 +183,16 @@ def submit_cosap_dna_job(sender, instance, created, **kwargs):
     if created:
         if are_project_files_ready(instance.id):
             submit_cosap_dna_task(instance.id)
+            # Increment successful DNA job submission - use actual project_type values
+            project_type = instance.project_type if instance.project_type else 'unknown'
+            cosap_dna_job_submissions_total.labels(status='submitted', project_type=project_type).inc()
         else:
             logger.info(
                 f"Project {instance.id} files are not ready. Skipping COSAP DNA job."
             )
+            # Increment skipped DNA job submission - use actual project_type values
+            project_type = instance.project_type if instance.project_type else 'unknown'
+            cosap_dna_job_submissions_total.labels(status='skipped', project_type=project_type).inc()
 
 
 @receiver(post_save, sender=Project)
@@ -154,8 +207,42 @@ def submit_cosap_parse_project_data_job(sender, instance, created, **kwargs):
             and instance.status == ProjectStatus.PARSING.value
         ):
             submit_cosap_parse_project_data(instance.id)
+            # Increment parse job submission
+            cosap_parse_job_submissions_total.labels(status='success').inc()
+            
+            # Track status change
+            old_status = getattr(instance, '_original_status', 'unknown')
+            project_status_changes_total.labels(
+                from_status=old_status, 
+                to_status=ProjectStatus.PARSING.value
+            ).inc()
         elif (
             "status" in updated_fields
             and instance.status == ProjectStatus.PENDING.value
         ):
             submit_cosap_dna_task(instance.id)
+            # Increment DNA job submission - use actual project_type values
+            project_type = instance.project_type if instance.project_type else 'unknown'
+            cosap_dna_job_submissions_total.labels(status='submitted', project_type=project_type).inc()
+            
+            # Track status change
+            old_status = getattr(instance, '_original_status', 'unknown')
+            project_status_changes_total.labels(
+                from_status=old_status, 
+                to_status=ProjectStatus.PENDING.value
+            ).inc()
+
+
+@receiver(post_save, sender=Project)
+def track_project_status_changes(sender, instance, created, **kwargs):
+    """
+    Track project status changes for metrics.
+    """
+    if not created and hasattr(instance, '_original_status'):
+        old_status = instance._original_status
+        new_status = instance.status
+        if old_status != new_status:
+            project_status_changes_total.labels(
+                from_status=old_status, 
+                to_status=new_status
+            ).inc()

@@ -20,33 +20,44 @@ def convert_vcf_format_to_snv(variant_dict: dict) -> dict:
     return variant_dict
 
 
-def get_non_annotated_variants(variant_list) -> list:
+def get_non_annotated_variants(variant_list, batch_size=1000) -> list:
     """
-    Takes a list of variants and returns a list of variant dict in format:
-    [
-        {
-            "CHROM": "chr1",
-            "POS": 12345,
-            "REF": "A",
-            "ALT": "T",
-        },
-        ...
-    ]
+    Takes a list of variants and returns a list of variant dict for non-annotated variants.
+    Processes in batches to avoid memory issues.
     """
-
-    variant_list = [convert_vcf_format_to_snv(variant) for variant in variant_list]
-    variant_ids = [variant["variant_id"] for variant in variant_list]
-
-    non_annotated = SmallVariant.objects.filter(
-        variant_id__in=variant_ids, variantannotation__isnull=True
-    )
-
-    non_annotated_variants = [
-        variant
-        for variant in variant_list
-        if variant["variant_id"] in non_annotated.values_list("variant_id", flat=True)
-    ]
-
+    if not variant_list:
+        return []
+    
+    # Process in batches to avoid memory issues
+    non_annotated_variants = []
+    
+    for i in range(0, len(variant_list), batch_size):
+        batch = variant_list[i:i + batch_size]
+        
+        # Convert batch to SNV format
+        batch_converted = [convert_vcf_format_to_snv(variant) for variant in batch]
+        batch_variant_ids = [variant["variant_id"] for variant in batch_converted]
+        
+        # Get non-annotated variant IDs for this batch
+        non_annotated_ids = set(
+            SmallVariant.objects.filter(
+                variant_id__in=batch_variant_ids, 
+                variantannotation__isnull=True
+            ).values_list("variant_id", flat=True)
+        )
+        
+        # Filter batch variants
+        batch_non_annotated = [
+            variant for variant in batch_converted
+            if variant["variant_id"] in non_annotated_ids
+        ]
+        
+        non_annotated_variants.extend(batch_non_annotated)
+        
+        # Log progress for large datasets
+        if len(variant_list) > 10000:
+            logger.info(f"Processed batch {i//batch_size + 1}/{(len(variant_list)-1)//batch_size + 1}")
+    
     return non_annotated_variants
 
 

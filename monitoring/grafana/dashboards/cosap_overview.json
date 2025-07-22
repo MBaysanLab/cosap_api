@@ -1,0 +1,555 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "COSAP API - Complete Monitoring Dashboard",
+    "tags": ["cosap", "api", "bioinformatics"],
+    "timezone": "browser",
+    "editable": true,
+    "graphTooltip": 1,
+    "links": [],
+    "panels": [
+      {
+        "id": 1,
+        "title": "System Overview",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "Active Projects",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(cosap_active_projects_count)",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 50},
+                {"color": "red", "value": 100}
+              ]
+            },
+            "unit": "short"
+          }
+        },
+        "gridPos": {"h": 8, "w": 4, "x": 0, "y": 1}
+      },
+      {
+        "id": 3,
+        "title": "Active Users (24h)",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "cosap_active_users_count",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "yellow", "value": 1},
+                {"color": "green", "value": 5}
+              ]
+            },
+            "unit": "short"
+          }
+        },
+        "gridPos": {"h": 8, "w": 4, "x": 4, "y": 1}
+      },
+      {
+        "id": 4,
+        "title": "Pending Jobs",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(cosap_pending_jobs_count)",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 10},
+                {"color": "red", "value": 25}
+              ]
+            },
+            "unit": "short"
+          }
+        },
+        "gridPos": {"h": 8, "w": 4, "x": 8, "y": 1}
+      },
+      {
+        "id": 5,
+        "title": "Queue Size",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(cosap_queue_size)",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 50},
+                {"color": "red", "value": 100}
+              ]
+            },
+            "unit": "short"
+          }
+        },
+        "gridPos": {"h": 8, "w": 4, "x": 12, "y": 1}
+      },
+      {
+        "id": 6,
+        "title": "System Health",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "up{job=\"django-app\"}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "green", "value": 1}
+              ]
+            },
+            "mappings": [
+              {"options": {"0": {"text": "DOWN"}}, "type": "value"},
+              {"options": {"1": {"text": "UP"}}, "type": "value"}
+            ],
+            "unit": "short"
+          }
+        },
+        "gridPos": {"h": 8, "w": 8, "x": 16, "y": 1}
+      },
+      {
+        "id": 7,
+        "title": "Project Analytics",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 9}
+      },
+      {
+        "id": 8,
+        "title": "Project Creation Rate",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(cosap_project_creation_total[5m])",
+            "legendFormat": "Projects/sec",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "reqps"
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 10}
+      },
+      {
+        "id": 9,
+        "title": "Projects by Type",
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "cosap_active_projects_count",
+            "legendFormat": "{{project_type}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "short"
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 10}
+      },
+      {
+        "id": 10,
+        "title": "Job Performance",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 18}
+      },
+      {
+        "id": 11,
+        "title": "Job Success Rates",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(cosap_dna_job_submissions_total{status=\"submitted\"}[5m])",
+            "legendFormat": "DNA Jobs Success",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(cosap_parse_job_submissions_total{status=\"success\"}[5m])",
+            "legendFormat": "Parse Jobs Success",
+            "refId": "B"
+          },
+          {
+            "expr": "rate(cosap_annotation_job_submissions_total{status=\"success\"}[5m])",
+            "legendFormat": "Annotation Jobs Success",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "reqps"
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 19}
+      },
+      {
+        "id": 12,
+        "title": "Job Duration (95th percentile)",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(cosap_job_duration_seconds_bucket[10m]))",
+            "legendFormat": "{{job_type}} (95th)",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "s"
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 19}
+      },
+      {
+        "id": 13,
+        "title": "API Performance",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 27}
+      },
+      {
+        "id": 14,
+        "title": "API Request Rate",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(django_http_requests_total_by_method[5m])",
+            "legendFormat": "{{method}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "reqps"
+          }
+        },
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 28}
+      },
+      {
+        "id": 15,
+        "title": "API Response Time (95th percentile)",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(cosap_api_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "{{endpoint}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "s"
+          }
+        },
+        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 28}
+      },
+      {
+        "id": 16,
+        "title": "API Error Rate",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(django_http_responses_total_by_status{status=~\"4..|5..\"}[5m])",
+            "legendFormat": "{{status}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "reqps"
+          }
+        },
+        "gridPos": {"h": 8, "w": 8, "x": 16, "y": 28}
+      },
+      {
+        "id": 17,
+        "title": "File Processing",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 36}
+      },
+      {
+        "id": 18,
+        "title": "File Upload Rate",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(cosap_file_upload_total[5m])",
+            "legendFormat": "{{file_type}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "reqps"
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 37}
+      },
+      {
+        "id": 19,
+        "title": "File Processing Duration",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(cosap_file_processing_duration_seconds_bucket[10m]))",
+            "legendFormat": "{{processing_type}} (95th)",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "s"
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 37}
+      },
+      {
+        "id": 20,
+        "title": "System Resources",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 45}
+      },
+      {
+        "id": 21,
+        "title": "Memory Usage",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "cosap_memory_usage_bytes / (1024^3)",
+            "legendFormat": "{{component}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "decbytes"
+          }
+        },
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 46}
+      },
+      {
+        "id": 22,
+        "title": "Disk Usage",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "cosap_disk_usage_bytes{usage_type=\"used\"} / (1024^3)",
+            "legendFormat": "Used - {{mount_point}}",
+            "refId": "A"
+          },
+          {
+            "expr": "cosap_disk_usage_bytes{usage_type=\"available\"} / (1024^3)",
+            "legendFormat": "Available - {{mount_point}}",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "decbytes"
+          }
+        },
+        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 46}
+      },
+      {
+        "id": 23,
+        "title": "Database Query Performance",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(cosap_database_query_duration_seconds_bucket[5m]))",
+            "legendFormat": "{{query_type}} (95th)",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "s"
+          }
+        },
+        "gridPos": {"h": 8, "w": 8, "x": 16, "y": 46}
+      },
+      {
+        "id": 24,
+        "title": "Error Tracking",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 54}
+      },
+      {
+        "id": 25,
+        "title": "Error Rate by Type",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(cosap_task_errors_total[5m])",
+            "legendFormat": "{{task_type}} - {{error_type}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "reqps"
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 55}
+      },
+      {
+        "id": 26,
+        "title": "Recent Errors",
+        "type": "logs",
+        "targets": [
+          {
+            "expr": "{job=\"django-app\"} |= \"ERROR\"",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 55}
+      },
+      {
+        "id": 27,
+        "title": "Infrastructure Metrics",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 63}
+      },
+      {
+        "id": 28,
+        "title": "Redis Performance",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "redis_connected_clients",
+            "legendFormat": "Connected Clients",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(redis_total_commands_processed_total[5m])",
+            "legendFormat": "Commands/sec",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "short"
+          }
+        },
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 64}
+      },
+      {
+        "id": 29,
+        "title": "PostgreSQL Performance",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "pg_stat_database_tup_fetched",
+            "legendFormat": "Tuples Fetched",
+            "refId": "A"
+          },
+          {
+            "expr": "pg_stat_database_tup_inserted",
+            "legendFormat": "Tuples Inserted",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "short"
+          }
+        },
+        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 64}
+      },
+      {
+        "id": 30,
+        "title": "Celery Workers",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "cosap_active_workers",
+            "legendFormat": "{{worker_type}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "short"
+          }
+        },
+        "gridPos": {"h": 8, "w": 8, "x": 16, "y": 64}
+      }
+    ],
+    "time": {"from": "now-1h", "to": "now"},
+    "refresh": "5s",
+    "schemaVersion": 30,
+    "style": "dark",
+    "templating": {
+      "list": [
+        {
+          "name": "interval",
+          "type": "interval",
+          "query": "1m,5m,15m,30m,1h,6h,12h,1d",
+          "current": {"text": "5m", "value": "5m"}
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "name": "Deployments",
+          "datasource": "Prometheus",
+          "expr": "changes(up{job=\"django-app\"}[5m]) > 0",
+          "titleFormat": "Service Restart",
+          "textFormat": "Django service restarted"
+        }
+      ]
+    }
+  }
+}

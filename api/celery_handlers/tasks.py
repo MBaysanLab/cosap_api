@@ -54,14 +54,14 @@ def cosap_annotation_task(variant_list: list, workdir: str, **kwargs):
 
 
 def cosap_parse_vcf_task(
-    vcf_path: str, caller_type: str, sample_name: str, sample_id: int = None
+    vcf_path: str, caller_type: str, sample_name: str, sample_id: int = None, reference_genome: str = "hg38"
 ):
     """
     Sends vcf path to cosap worker and retrieve parsed vcf as dict.
     """
     task = celery_app.send_task(
         COSAPTasks.PARSE_VCF_TASK.value,
-        args=[vcf_path, sample_name, caller_type],
+        args=[vcf_path, sample_name, caller_type, reference_genome],
         link=on_parse_vcf_task_success.s(sample_id=sample_id),
         link_error=on_parse_vcf_task_failure.s(sample_id=sample_id),
     )

@@ -47,6 +47,7 @@ from api.models import (
     ProjectTask,
     Sample,
     ProjectSample,
+    SampleReferenceGenome
 )
 from api.permissions import IsOwnerOrDoesNotExist, OnlyAdminToList
 
@@ -717,6 +718,7 @@ class SampleViewSet(viewsets.ViewSet):
         sample_name = request.data.get("sample_name")
         sample_type = request.data.get("sample_type")
         sample_files_ids = request.data.get("file_ids")
+        reference_genome = request.data.get("reference_genome")
 
         if not sample_files_ids:
             return Response(status=status.HTTP_400_BAD_REQUEST)
@@ -729,6 +731,17 @@ class SampleViewSet(viewsets.ViewSet):
         for file in sample_files_ids:
             sample.files.add(File.objects.get(uuid=file))
         sample.save()
+
+        if reference_genome:
+            SampleReferenceGenome.objects.create(
+                sample=sample,
+                reference_genome=reference_genome,
+            )
+        else:
+            SampleReferenceGenome.objects.create(
+                sample=sample,
+                reference_genome="hg38",
+            )
 
         return Response(str(sample.uuid))
 
@@ -750,6 +763,7 @@ class FileViewSet(ProcessView, PatchView, viewsets.ViewSet):
             if request.GET.get("file_type")
             else None
         )
+        reference_genome = request.GET.get("reference_genome")
 
         if return_type and (return_type == "projectFileMap"):
             project = Project.objects.get(id=project_id)

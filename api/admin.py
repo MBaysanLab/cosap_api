@@ -80,6 +80,7 @@ admin.site.register(ProjectQCSummary)
 admin.site.register(SampleSmallVariantData)
 admin.site.register(Sample)
 admin.site.register(ProjectSample)
+admin.site.register(SampleReferenceGenome)
 
 
 @admin.register(Project)
