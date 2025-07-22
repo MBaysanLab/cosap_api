@@ -193,8 +193,12 @@ def on_dna_pipeline_task_failure(task_id, **kwargs):
         logger.error("Missing project_id in task kwargs")
         return
     
-    # Track DNA job failure
-    cosap_dna_job_submissions_total.labels(status='failed').inc()
+    # Track DNA job failure with consistent labels
+    project_type = kwargs.get("project_type", "unknown")
+    cosap_dna_job_submissions_total.labels(
+        status='failed',
+        project_type=project_type
+    ).inc()
         
     update_project_status(project_id, ProjectStatus.FAILED, result)
 
@@ -271,7 +275,12 @@ def on_parse_task_failure(task_id, **kwargs):
     project_id = kwargs.get("project_id")
     if not project_id:
         logger.error("Missing project_id in task kwargs")
+        task_errors_total.labels(task_type='parse', error_type='MissingProjectId').inc()
         return
+    
+    # Track parse job failure
+    cosap_parse_job_submissions_total.labels(status='failed').inc()
+    task_errors_total.labels(task_type='parse', error_type='TaskFailed').inc()
         
     update_project_status(project_id, ProjectStatus.FAILED, result)
 

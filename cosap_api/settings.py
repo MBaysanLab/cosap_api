@@ -15,9 +15,9 @@ import os
 import tempfile
 from pathlib import Path
 
-import sentry_sdk
-from sentry_sdk.integrations.django import DjangoIntegration
-from sentry_sdk.integrations.logging import ignore_logger
+# import sentry_sdk
+# from sentry_sdk.integrations.django import DjangoIntegration
+# from sentry_sdk.integrations.logging import ignore_logger
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -221,20 +221,20 @@ ELASTICSEARCH_DSL = {
 }
 
 
-sentry_sdk.init(
-    dsn=os.environ.get("SENTRY_DSN"),
-    integrations=[
-        DjangoIntegration(),
-    ],
-    # Set traces_sample_rate to 1.0 to capture 100%
-    # of transactions for performance monitoring.
-    # We recommend adjusting this value in production.
-    traces_sample_rate=1.0,
-    # If you wish to associate users to errors (assuming you are using
-    # django.contrib.auth) you may enable sending PII data.
-    send_default_pii=True,
-)
-ignore_logger("django.security.DisallowedHost")
+# sentry_sdk.init(
+#     dsn=os.environ.get("SENTRY_DSN"),
+#     integrations=[
+#         DjangoIntegration(),
+#     ],
+#     # Set traces_sample_rate to 1.0 to capture 100%
+#     # of transactions for performance monitoring.
+#     # We recommend adjusting this value in production.
+#     traces_sample_rate=1.0,
+#     # If you wish to associate users to errors (assuming you are using
+#     # django.contrib.auth) you may enable sending PII data.
+#     send_default_pii=True,
+# )
+# ignore_logger("django.security.DisallowedHost")
 
 
 LOGGING = {
@@ -261,10 +261,13 @@ LOGGING = {
 DATA_UPLOAD_MAX_NUMBER_FIELDS = 100000
 
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
-EMAIL_HOST = "mailhog"
-EMAIL_PORT = 1025
-EMAIL_USE_TLS = False
-EMAIL_USE_SSL = False
-DEFAULT_FROM_EMAIL = "webmaster@localhost"
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "mailserver")  # Docker service name
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", 587))  # Use 587 for STARTTLS or 465 for SSL
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "True") == "True"  # Enable STARTTLS
+EMAIL_USE_SSL = os.environ.get("EMAIL_USE_SSL", "False") == "True"  # Use False for port 587
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")  # Your email account
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")  # Account password
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "noreply@yourdomain.com")
+SERVER_EMAIL = os.environ.get("SERVER_EMAIL", DEFAULT_FROM_EMAIL)
 
 ANNOTATE_VARIANTS = os.environ.get("ANNOTATE_VARIANTS", "True") == "True"
