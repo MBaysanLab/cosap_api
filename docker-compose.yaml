@@ -77,9 +77,9 @@ services:
       - "15672:15672"
       - "5672:5672"
     environment:
-      - RABBITMQ_DEFAULT_VHOST=vhost
-      - RABBITMQ_DEFAULT_USER=guest
-      - RABBITMQ_DEFAULT_PASS=guest
+      - RABBITMQ_DEFAULT_VHOST=${RABBITMQ_DEFAULT_VHOST:-vhost}
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_DEFAULT_USER:-guest}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_DEFAULT_PASS:-guest}
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.17.2
@@ -183,8 +183,8 @@ services:
       - "9419:9419"
     environment:
       - RABBIT_URL=http://rabbitmq:15672
-      - RABBIT_USER=guest
-      - RABBIT_PASSWORD=guest
+      - RABBIT_USER=${RABBITMQ_DEFAULT_USER:-guest}
+      - RABBIT_PASSWORD=${RABBITMQ_DEFAULT_PASS:-guest}
     depends_on:
       - rabbitmq
     restart: unless-stopped
