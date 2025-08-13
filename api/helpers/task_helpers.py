@@ -13,7 +13,7 @@ from ..constants import (
     ProjectTypes,
     Sampletypes,
 )
-from ..models import Project, ProjectFile, Sample, SampleReferenceGenome
+from ..models import Sample, SampleReferenceGenome
 from .project_helpers import (
     get_project_algorithms,
     get_project_dir,
@@ -48,7 +48,9 @@ def submit_cosap_dna_task(project_id: int):
             logger.info(f"Submitting VCF parse task for sample {sample_id}")
 
             sample = Sample.objects.get(id=sample_id)
-            reference_genome = SampleReferenceGenome.objects.get(sample=sample).reference_genome
+            reference_genome = SampleReferenceGenome.objects.get(
+                sample=sample
+            ).reference_genome
             submit_vcf_parse_task(
                 vcf_path=sample_data[sample_id]["files"],
                 sample_name=None,
@@ -56,6 +58,7 @@ def submit_cosap_dna_task(project_id: int):
                 sample_id=sample_id,
                 reference_genome=reference_genome,
             )
+            set_project_status(project_id, ProjectStatus.RUNNING.value)
 
         elif sample_data[sample_id]["file_type"] == FileExtensions.FASTQ.name:
             if sample_data[sample_id]["sample_type"] == Sampletypes.NORMAL.value:
@@ -74,6 +77,7 @@ def submit_cosap_dna_task(project_id: int):
             )
             # Submit task
             submit_dna_tasks(project_id, project_type, task_inputs)
+            set_project_status(project_id, ProjectStatus.RUNNING.value)
     else:
         if len(fastq_pairs) > 0:
             # For somatic or germline, submit all normal samples together
@@ -83,14 +87,18 @@ def submit_cosap_dna_task(project_id: int):
                 project_id,
                 project_type,
                 {
-                    "normal_pair": normal_pairs,
-                    "tumor_pair": tumor_pairs,
+                    "normal_pair": normal_pairs[0] if normal_pairs else None,
+                    "tumor_pair": tumor_pairs[0] if tumor_pairs else None,
                 },
             )
             # Submit task
             submit_dna_tasks(project_id, project_type, task_inputs)
-
-    set_project_status(project_id, ProjectStatus.RUNNING.value)
+            set_project_status(project_id, ProjectStatus.RUNNING.value)
+        else:
+            logger.error(f"No valid FASTQ pairs found for project {project_id}")
+            logger.error(f"The sample data is: {sample_data}")
+            set_project_stderr(project_id, "No valid FASTQ pairs found.")
+            set_project_status(project_id, ProjectStatus.FAILED.value)
 
 
 def get_sample_files(project_id: int):
@@ -135,7 +143,7 @@ def create_dna_task_inputs(project_id: int, project_type: str, fastq_pairs):
     """
     try:
         bed_file = get_project_files(project_id, FileExtensions.BED.name)[0].file.path
-    except Exception as e:
+    except Exception:
         bed_file = None
 
     algorithms = get_project_algorithms(project_id)
@@ -158,7 +166,9 @@ def create_dna_task_inputs(project_id: int, project_type: str, fastq_pairs):
     base_inputs.update(
         {
             CosapDnaTaskInputs.NORMAL_SAMPLE.value: fastq_pairs.get("normal_pair"),
-            CosapDnaTaskInputs.TUMOR_SAMPLES.value: fastq_pairs.get("tumor_pair"),
+            CosapDnaTaskInputs.TUMOR_SAMPLES.value: (
+                [fastq_pairs.get("tumor_pair")] if fastq_pairs.get("tumor_pair") else []
+            ),
         }
     )
 
@@ -174,16 +184,18 @@ def submit_dna_tasks(project_id: int, project_type: str, task_inputs):
         for input_data in task_inputs:
             cosap_dna_task(project_id, **input_data)
     else:
-        # For germline/somatic, submit a single task
+        logger.info(
+            f"Submitting COSAP DNA task for project {project_id} with inputs: {task_inputs}"
+        )
         cosap_dna_task(project_id, **task_inputs)
 
 
-def submit_cosap_parse_project_data(project_id: int):
+def submit_cosap_parse_project_data_task(project_id: int, workdir: str = None):
     """
     Submits a COSAP parse project data task to Celery.
     """
-
-    workdir = get_project_dir(project_id)
+    if workdir is None:
+        workdir = get_project_dir(project_id)
     results = cosap_parse_project_data_task(workdir, project_id)
 
     return results

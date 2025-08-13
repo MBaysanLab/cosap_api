@@ -3,17 +3,14 @@ import re
 import shutil
 from datetime import datetime
 
-from celery.result import AsyncResult
 from django.conf import settings
 from django.core.mail import send_mail
-from django.db.models import Q, Case, When, IntegerField
+from django.db.models import Case, When, IntegerField
 from django.db import transaction, DataError, models
 from django.template.loader import render_to_string
 import json
 from tempfile import NamedTemporaryFile
 from logging import getLogger
-from django.utils.http import urlsafe_base64_encode
-from django.utils.encoding import force_bytes
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
 
 logger = getLogger(__name__)
@@ -304,21 +301,19 @@ def order_variants_by_acmg_severity(queryset):
 def write_message_file(data):
     """Write data to a file in a temporary subdirectory within the shared mounted directory."""
     import tempfile
-    
+
     # Create a temporary directory within MEDIA_TMP
     tmp_dir = tempfile.mkdtemp(dir=settings.MEDIA_TMP)
-    
+
     # Create the temporary file within the temporary directory
-    tmp_file = NamedTemporaryFile(
-        suffix=".json", dir=tmp_dir, delete=False, mode="w"
-    )
-    
+    tmp_file = NamedTemporaryFile(suffix=".json", dir=tmp_dir, delete=False, mode="w")
+
     with tmp_file as f:
         if isinstance(data, (dict, list)):
             json.dump(data, f)
         else:
             f.write(str(data))
-    
+
     return tmp_file.name
 
 
@@ -424,7 +419,7 @@ def safe_bulk_create(
                     )
                     created_count += len(created_objects)
                 except DataError as e:
-                    logger.error(f"Error in batch {i//batch_size}: {e}")
+                    logger.error(f"Error in batch {i // batch_size}: {e}")
                     raise  # Raise the exception to rollback the transaction
 
     except DataError:
@@ -436,7 +431,7 @@ def safe_bulk_create(
                     obj.save()
                     created_count += 1
                 except DataError as e:
-                    logger.error(f"Error in record {i+j}: {e}")
+                    logger.error(f"Error in record {i + j}: {e}")
                     # Print all string field values for this record
                     for field_name, max_length in varchar_fields.items():
                         value = getattr(obj, field_name, None)

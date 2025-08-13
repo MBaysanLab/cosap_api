@@ -51,7 +51,6 @@ class COSAPTasks(Enum):
 
 
 class ProjectAlgorithmKeys(Enum):
-
     # JS naming convention is used since the keys are used in the frontend
     ALIGNER = "aligner"
     VARIANT_CALLER = "variantCaller"

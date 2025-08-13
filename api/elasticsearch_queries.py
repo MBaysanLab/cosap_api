@@ -109,10 +109,12 @@ def filter_variants_by_annotation(
                             {"range": {query_field: {"lte": float(query_value)}}},
                             {"bool": {"must_not": {"exists": {"field": query_field}}}},
                         ],
-                        minimum_should_match=1
+                        minimum_should_match=1,
                     )
                 except ValueError:
-                    logger.warning(f"Invalid numeric value for range query: {query_value}")
+                    logger.warning(
+                        f"Invalid numeric value for range query: {query_value}"
+                    )
                     continue
             else:
                 search = search.filter(query_type, **{query_field: query_value})

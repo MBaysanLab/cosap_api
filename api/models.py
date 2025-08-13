@@ -7,10 +7,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.models import AbstractUser, UserManager
 from django.db import models, transaction
-from django.db.models.signals import post_save
-from django.dispatch import receiver
 from django_countries.fields import CountryField
-from rest_framework.authtoken.models import Token
 
 from .constants import ProjectStatus, FileExtensions
 
@@ -57,7 +54,6 @@ USER = get_user_model()
 
 
 class Project(models.Model):
-
     SOMATIC = "SOMATIC"
     GERMLINE = "GERMLINE"
     GERMLINE_TRIO = "GERMLINE_TRIO"
@@ -154,7 +150,6 @@ class SmallVariant(models.Model):
 
 
 class VariantAnnotation(models.Model):
-
     variant = models.ForeignKey(SmallVariant, on_delete=models.CASCADE)
 
     # VEP fields
@@ -242,7 +237,6 @@ def user_directory_path(instance, filename):
 
 
 class File(models.Model):
-
     user = models.ForeignKey(USER, null=True, on_delete=models.SET_NULL)
     uuid = models.CharField(max_length=256, default=uuid.uuid4, editable=True)
     upload_time = models.DateTimeField(auto_now_add=True)
@@ -260,7 +254,7 @@ class File(models.Model):
         if not self.name:
             self.name = self.file.name
 
-        # Get file extension
+        # Get file extension
         filename = PurePosixPath(self.name)
         suffixes = set([suffix[1:] for suffix in filename.suffixes])
 
@@ -277,7 +271,7 @@ class File(models.Model):
             if extensions_set.intersection(suffixes):
                 found_type = file_type
                 break
-        
+
         self.file_type = found_type
         super(File, self).save(*args, **kwargs)
 
@@ -294,7 +288,6 @@ class ProjectFile(models.Model):
 
 
 class Sample(models.Model):
-
     TUMOR = "TUMOR"
     NORMAL = "NORMAL"
     SAMPLE_TYPES = [(TUMOR, "tumor"), (NORMAL, "normal")]
@@ -326,7 +319,7 @@ class Sample(models.Model):
         blank=True,
         related_name="mother_of",
     )
-    
+
     siblings = models.ManyToManyField(
         "self",
         blank=True,
@@ -343,7 +336,7 @@ class Sample(models.Model):
 
     def __str__(self):
         return self.name
-    
+
     def get_sample_file_type(self):
         return self.files.first().file_type
 
@@ -365,10 +358,11 @@ class SampleSmallVariantData(models.Model):
     read_depth = models.IntegerField(null=True, blank=True)
 
     class Meta:
-        unique_together = ['variant', 'sample']
+        unique_together = ["variant", "sample"]
 
     def __str__(self) -> str:
         return f"{self.sample.id}_{self.sample.name} - small variant data"
+
 
 class SampleReferenceGenome(models.Model):
     sample = models.ForeignKey(Sample, on_delete=models.CASCADE)
@@ -382,6 +376,7 @@ class SampleReferenceGenome(models.Model):
 
     def __str__(self):
         return f"{self.sample.name} - reference"
+
 
 class ProjectSample(models.Model):
     project = models.ForeignKey(Project, on_delete=models.CASCADE)
@@ -413,7 +408,6 @@ class Affiliation(models.Model):
 
 
 class Action(models.Model):
-
     PROJECT_CREATION = "PC"
     FILE_UPLOAD = "FU"
     REPORT_CREATION = "RC"

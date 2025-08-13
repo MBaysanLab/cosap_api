@@ -1,5 +1,4 @@
 from django.urls import include, path, re_path
-from rest_framework.authtoken import views as auth_views
 from rest_framework.routers import DefaultRouter
 
 from api import views
@@ -34,6 +33,12 @@ urlpatterns = [
         "verify-email/<uidb64>/<token>/",
         views.UserAuthViewSet.as_view({"get": "verify_email_token"}),
         name="verify-email",
+    ),
+    # Use the existing resend_verification method from UserAuthViewSet
+    path(
+        "resend-verification/",
+        views.UserAuthViewSet.as_view({"post": "resend_verification"}),
+        name="resend-verification",
     ),
     re_path(r"igv/(?P<b64_string>.+)/?$", views.IGVDataView.as_view()),
 ]

@@ -12,7 +12,6 @@ https://docs.djangoproject.com/en/4.0/ref/settings/
 
 import json
 import os
-import tempfile
 from pathlib import Path
 
 # import sentry_sdk
@@ -32,7 +31,9 @@ SECRET_KEY = os.environ["COSAP_DJANGO_SECRET"]
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get("COSAP_DJANGO_DEBUG") == "True"
 
-ALLOWED_HOSTS = ["localhost", "web"] + json.loads(os.environ.get("COSAP_BIO_HOST", "[]"))
+ALLOWED_HOSTS = ["localhost", "web"] + json.loads(
+    os.environ.get("COSAP_BIO_HOST", "[]")
+)
 
 CSRF_TRUSTED_ORIGINS = [os.environ.get("COSAP_CORS_TRUSTED_ORIGINS")]
 
@@ -53,6 +54,7 @@ CORS_ALLOW_CREDENTIALS = True
 
 # Application definition
 INSTALLED_APPS = [
+    "api.apps.ApiConfig",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -66,7 +68,6 @@ INSTALLED_APPS = [
     "django_drf_filepond",
     "django_json_widget",
     "django_elasticsearch_dsl",
-    "api",
     "django_prometheus",
 ]
 
@@ -243,12 +244,17 @@ LOGGING = {
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
+            "level": "INFO",  # Add this
         },
         "file": {
             "level": "DEBUG",
             "class": "logging.FileHandler",
             "filename": "log.django",
         },
+    },
+    "root": {  # Add this section
+        "handlers": ["console", "file"],
+        "level": os.getenv("DJANGO_LOG_LEVEL", "INFO"),
     },
     "loggers": {
         "django": {
@@ -261,13 +267,14 @@ LOGGING = {
 DATA_UPLOAD_MAX_NUMBER_FIELDS = 100000
 
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
-EMAIL_HOST = os.environ.get("EMAIL_HOST", "mailserver")  # Docker service name
-EMAIL_PORT = int(os.environ.get("EMAIL_PORT", 587))  # Use 587 for STARTTLS or 465 for SSL
-EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "True") == "True"  # Enable STARTTLS
-EMAIL_USE_SSL = os.environ.get("EMAIL_USE_SSL", "False") == "True"  # Use False for port 587
-EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")  # Your email account
-EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")  # Account password
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "mailserver")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", 587))
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "True") == "True"
+EMAIL_USE_SSL = os.environ.get("EMAIL_USE_SSL", "False") == "True"
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "noreply@yourdomain.com")
+SUPPORT_EMAIL = os.environ.get("SUPPORT_EMAIL", "support@cosap.bio")
 SERVER_EMAIL = os.environ.get("SERVER_EMAIL", DEFAULT_FROM_EMAIL)
 
 ANNOTATE_VARIANTS = os.environ.get("ANNOTATE_VARIANTS", "True") == "True"

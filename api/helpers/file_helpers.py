@@ -1,7 +1,5 @@
 import os
-import warnings
 
-from django.conf import settings
 
 
 def wait_file_update_complete(file_path: str, timeout: int = 1000) -> bool:
@@ -20,7 +18,6 @@ def wait_file_update_complete(file_path: str, timeout: int = 1000) -> bool:
         Exception if timeout is reached before update completes
     """
     import time
-    import os
 
     start_time = time.time()
     last_modified = os.path.getmtime(file_path)

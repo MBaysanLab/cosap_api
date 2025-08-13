@@ -1,12 +1,12 @@
-from django.contrib.auth import authenticate, get_user_model, password_validation
+from django.contrib.auth import get_user_model
 from django.urls import reverse
 from django.utils.http import urlsafe_base64_encode
 from django.utils.encoding import force_bytes
 from rest_framework import serializers
-from rest_framework.authtoken.models import Token
 
-from api.models import Action, Affiliation, File, Project, Sample
+from api.models import Action, Affiliation, File, Project
 from common.utils import send_verification_email, email_verification_token
+from django.contrib.sites.shortcuts import get_current_site
 
 USER = get_user_model()
 
@@ -83,9 +83,8 @@ class RegistrationSerializer(serializers.ModelSerializer):
         if not user.is_guest:
             uid = urlsafe_base64_encode(force_bytes(user.pk))
             token = email_verification_token.make_token(user)
-            verification_link = reverse(
-                "verify-email", kwargs={"uidb64": uid, "token": token}
-            )
+            current_site = get_current_site(self.context["request"]).domain
+            verification_link = f"http://{current_site}{reverse('verify-email', kwargs={'uidb64': uid, 'token': token})}"
             send_verification_email(user, verification_link)
 
         return user
@@ -146,7 +145,6 @@ class ProjectSerializer(serializers.ModelSerializer):
 
 
 class ActionSerializer(serializers.ModelSerializer):
-
     associated_user = serializers.SlugRelatedField(
         read_only=True,
         slug_field="email",

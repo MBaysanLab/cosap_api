@@ -13,7 +13,7 @@ services:
         "celery -A cosap.celery.celery worker -l INFO -Q cosap_worker -c 3 -n cosap_worker@%h -Ofair",
       ]
     env_file:
-      - .env
+      - .env.dev
     working_dir: /user_files
 
   db:
@@ -44,7 +44,7 @@ services:
     ports:
       - "8000:8000"
     env_file:
-      - .env
+      - .env.dev
     depends_on:
       - db
       - prometheus
@@ -57,7 +57,7 @@ services:
       - ${COSAP_MEDIA_ROOT}:/user_files
       - .:/webapi
     env_file:
-      - .env
+      - .env.dev
     depends_on:
       - db
       - redis
@@ -131,7 +131,7 @@ services:
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
       - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL:-http://localhost:3001}
     env_file:
-      - .env
+      - .env.dev
     restart: unless-stopped
     depends_on:
       - prometheus
@@ -203,6 +203,14 @@ services:
       - '--es.indices'
     depends_on:
       - elasticsearch
+    restart: unless-stopped
+  
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: cosap-mailhog
+    ports:
+      - "1025:1025"
+      - "8025:8025"
     restart: unless-stopped
 
 volumes:

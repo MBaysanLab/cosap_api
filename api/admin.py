@@ -1,7 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 from django.db import models
-from django_drf_filepond.models import TemporaryUpload
 from django_json_widget.widgets import JSONEditorWidget
 
 from .models import *

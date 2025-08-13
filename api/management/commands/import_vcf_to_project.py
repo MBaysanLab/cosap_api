@@ -1,11 +1,11 @@
 from django.core.management.base import BaseCommand
 
 from ...helpers.task_helpers import submit_vcf_parse_task
-from ...models import USER, Project
+from ...models import USER, Project, Sample, ProjectSample
 
 
 class Command(BaseCommand):
-    help = "Imports a COSAP output dir as project."
+    help = "Imports a VCF file as project."
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -30,20 +30,33 @@ class Command(BaseCommand):
 
     def handle(self, *args, **kwargs):
         self.stdout.write(
-            f"Importing COSAP output dir as project with name {kwargs["project_name"]}."
+            f"Importing VCF file as project with name {kwargs['project_name']}."
         )
 
         # Get user
         user = USER.objects.get(email=kwargs["user_email"])
 
         # Create a new project
-        project = Project.objects.create(user=user, name=kwargs["project_name"], is_draft=True)
+        project = Project.objects.create(
+            user=user, name=kwargs["project_name"], is_draft=True
+        )
         project.save()
+
+        # Create Sample
+        sample = Sample.objects.create()
+        sample.save()
+
+        # Create a project sample and link it to the project and sample
+        project_sample = ProjectSample.objects.create(
+            project=project,
+        )
+        project_sample.samples.add(sample)
+        project_sample.save()
 
         # Submit the COSAP parse project data task
         submit_vcf_parse_task(
             vcf_path=kwargs["vcf_path"],
             caller_type=kwargs["caller_type"],
             sample_name=kwargs["sample_name"],
-            project_id=project.id,
+            sample_id=sample.id,
         )

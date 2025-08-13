@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email Verification</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1);
+            max-width: 500px;
+            width: 100%;
+            text-align: center;
+            padding: 60px 40px;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+        }
+        
+        .icon {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+            color: white;
+            margin-bottom: 30px;
+        }
+        
+        .success .icon {
+            background: linear-gradient(135deg, #4CAF50, #45a049);
+        }
+        
+        .error .icon {
+            background: linear-gradient(135deg, #f44336, #da190b);
+        }
+        
+        h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 15px;
+            color: #2c3e50;
+        }
+        
+        .success h1 {
+            color: #27ae60;
+        }
+        
+        .error h1 {
+            color: #e74c3c;
+        }
+        
+        .message {
+            font-size: 16px;
+            color: #7f8c8d;
+            line-height: 1.6;
+            margin-bottom: 40px;
+        }
+        
+        .btn {
+            display: inline-block;
+            padding: 15px 30px;
+            border-radius: 50px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+        }
+        
+        .btn-secondary {
+            background: #ecf0f1;
+            color: #2c3e50;
+            margin-left: 15px;
+        }
+        
+        .btn-secondary:hover {
+            background: #d5dbdb;
+            transform: translateY(-2px);
+        }
+        
+        .footer {
+            margin-top: 40px;
+            padding-top: 30px;
+            border-top: 1px solid #ecf0f1;
+            font-size: 14px;
+            color: #95a5a6;
+        }
+        
+        @media (max-width: 480px) {
+            .container {
+                padding: 40px 30px;
+            }
+            
+            h1 {
+                font-size: 24px;
+            }
+            
+            .btn {
+                display: block;
+                margin: 10px 0;
+            }
+            
+            .btn-secondary {
+                margin-left: 0;
+            }
+        }
+        
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    {% if status == 'success' %}
+    <!-- Success State -->
+    <div class="container success">
+        <div class="icon">✓</div>
+        <h1>{{ title }}</h1>
+        <p class="message">{{ message }}</p>
+    </div>
+    {% else %}
+    <!-- Error State -->
+    <div class="container error">
+        <div class="icon">✗</div>
+        <h1>{{ title }}</h1>
+        <p class="message">{{ message }}</p>
+        
+        <!-- Email input form for resend verification -->
+        <div id="resend-form" style="margin-bottom: 30px;">
+            <div style="margin-bottom: 15px;">
+                <input type="email" id="email-input" placeholder="Enter your email address" 
+                       style="width: 100%; padding: 12px; border: 2px solid #ecf0f1; border-radius: 10px; font-size: 14px; text-align: center;">
+            </div>
+            <div id="resend-message" style="display: none; padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 14px;"></div>
+        </div>
+        
+        <div class="actions">
+            <button onclick="resendVerification()" class="btn btn-primary" id="resend-btn">Resend Verification</button>
+            <a href="mailto:support@cosap.bio" class="btn btn-secondary">Get Help</a>
+        </div>
+    </div>
+    {% endif %}
+
+    <script>
+        async function resendVerification() {
+            const emailInput = document.getElementById('email-input');
+            const messageDiv = document.getElementById('resend-message');
+            const resendBtn = document.getElementById('resend-btn');
+            const email = emailInput.value.trim();
+            
+            if (!email) {
+                showMessage('Please enter your email address', 'error');
+                return;
+            }
+            
+            if (!isValidEmail(email)) {
+                showMessage('Please enter a valid email address', 'error');
+                return;
+            }
+            
+            // Show loading state
+            resendBtn.disabled = true;
+            resendBtn.textContent = 'Sending...';
+            messageDiv.style.display = 'none';
+            
+            try {
+                const response = await fetch('{% url "resend-verification" %}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}',
+                    },
+                    body: JSON.stringify({ email: email })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showMessage(result.detail || 'Verification email sent successfully!', 'success');
+                    emailInput.value = '';
+                } else {
+                    showMessage(result.error || 'Failed to send verification email', 'error');
+                }
+                
+            } catch (error) {
+                showMessage('Network error. Please try again.', 'error');
+            } finally {
+                // Reset button state
+                resendBtn.disabled = false;
+                resendBtn.textContent = 'Resend Verification';
+            }
+        }
+        
+        function showMessage(text, type) {
+            const messageDiv = document.getElementById('resend-message');
+            messageDiv.textContent = text;
+            messageDiv.style.display = 'block';
+            
+            if (type === 'success') {
+                messageDiv.style.background = '#d4edda';
+                messageDiv.style.color = '#155724';
+                messageDiv.style.border = '1px solid #c3e6cb';
+            } else {
+                messageDiv.style.background = '#f8d7da';
+                messageDiv.style.color = '#721c24';
+                messageDiv.style.border = '1px solid #f5c6cb';
+            }
+        }
+        
+        function isValidEmail(email) {
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            return emailRegex.test(email);
+        }
+        
+        // Allow Enter key to submit
+        document.getElementById('email-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                resendVerification();
+            }
+        });
+    </script>
+</body>
+</html>

@@ -73,19 +73,19 @@ def handle_parse_vcf_results_for_sample(variant_list, sample_id):
         )
 
     safe_bulk_create(SmallVariant, variants_to_create, ignore_conflicts=True)
-    
+
     # Get actually created variants to identify failed ones
     successfully_created_variant_ids = set(
         SmallVariant.objects.filter(variant_id__in=variant_ids).values_list(
             "variant_id", flat=True
         )
     )
-    
+
     # Remove failed variants from variant_map to avoid issues downstream
     failed_variant_ids = set(variant_ids) - successfully_created_variant_ids
     for failed_vid in failed_variant_ids:
         variant_map.pop(failed_vid, None)
-    
+
     # Get or create the sample-variants relationship in one operation
     sample_small_variants, _ = SampleSmallVariant.objects.get_or_create(sample=sample)
 
@@ -96,7 +96,9 @@ def handle_parse_vcf_results_for_sample(variant_list, sample_id):
 
     # Create the SampleSmallVariantData objects - now only for valid variants
     data_to_create = []
-    for vid in variant_map.keys():  # variant_map now only contains successfully created variants
+    for vid in (
+        variant_map.keys()
+    ):  # variant_map now only contains successfully created variants
         data_to_create.append(
             SampleSmallVariantData(
                 sample=sample,

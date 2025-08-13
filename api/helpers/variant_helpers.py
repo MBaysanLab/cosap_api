@@ -7,7 +7,6 @@ logger = logging.getLogger(__name__)
 
 
 def convert_vcf_format_to_snv(variant_dict: dict) -> dict:
-
     variant_dict["variant_id"] = "_".join(
         [
             variant_dict[VCFHeaders.CHROM.value],
@@ -27,37 +26,39 @@ def get_non_annotated_variants(variant_list, batch_size=1000) -> list:
     """
     if not variant_list:
         return []
-    
+
     # Process in batches to avoid memory issues
     non_annotated_variants = []
-    
+
     for i in range(0, len(variant_list), batch_size):
-        batch = variant_list[i:i + batch_size]
-        
+        batch = variant_list[i : i + batch_size]
+
         # Convert batch to SNV format
         batch_converted = [convert_vcf_format_to_snv(variant) for variant in batch]
         batch_variant_ids = [variant["variant_id"] for variant in batch_converted]
-        
+
         # Get non-annotated variant IDs for this batch
         non_annotated_ids = set(
             SmallVariant.objects.filter(
-                variant_id__in=batch_variant_ids, 
-                variantannotation__isnull=True
+                variant_id__in=batch_variant_ids, variantannotation__isnull=True
             ).values_list("variant_id", flat=True)
         )
-        
+
         # Filter batch variants
         batch_non_annotated = [
-            variant for variant in batch_converted
+            variant
+            for variant in batch_converted
             if variant["variant_id"] in non_annotated_ids
         ]
-        
+
         non_annotated_variants.extend(batch_non_annotated)
-        
+
         # Log progress for large datasets
         if len(variant_list) > 10000:
-            logger.info(f"Processed batch {i//batch_size + 1}/{(len(variant_list)-1)//batch_size + 1}")
-    
+            logger.info(
+                f"Processed batch {i // batch_size + 1}/{(len(variant_list) - 1) // batch_size + 1}"
+            )
+
     return non_annotated_variants
 
 
@@ -108,7 +109,6 @@ def handle_annotation_results(annotation_results: list) -> None:
             )
             variants_to_create.append(svar)
 
-
         # Prepare annotation
         cleaned_variant = {}
         for key, value in variant.items():
@@ -123,4 +123,6 @@ def handle_annotation_results(annotation_results: list) -> None:
 
     # Bulk create new annotations
     if annotations_to_create:
-        safe_bulk_create(VariantAnnotation, annotations_to_create, ignore_conflicts=True)
+        safe_bulk_create(
+            VariantAnnotation, annotations_to_create, ignore_conflicts=True
+        )

@@ -1,37 +1,33 @@
 import base64
 import json
-import mimetypes
 import os
 import re
 import tempfile
-from pathlib import Path
-from urllib import request
 from wsgiref.util import FileWrapper
 import zipfile
 from collections import defaultdict
-import random
 
-import pysam
 from django.contrib.auth import get_user_model
-from django.core import serializers as django_serializers
 from django.db.models import Q
 from django.db.models.query import QuerySet
 from django.forms.models import model_to_dict
 from django.http import Http404, HttpResponse, StreamingHttpResponse
-from django.shortcuts import get_object_or_404
+from django.shortcuts import get_object_or_404, render
 from django.core.paginator import Paginator
-from django_drf_filepond.parsers import PlainTextParser, UploadChunkParser
+from django_drf_filepond.parsers import UploadChunkParser
 from django_drf_filepond.renderers import PlainTextRenderer
 from django_drf_filepond.views import PatchView, ProcessView
 from rest_framework import mixins, permissions, status, views, viewsets
 from rest_framework.authtoken.models import Token
 from rest_framework.authtoken.views import ObtainAuthToken
-from rest_framework.decorators import action, api_view
+from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser
 from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from django.utils.http import urlsafe_base64_decode
 from django.utils.encoding import force_str
+from django.contrib.sites.shortcuts import get_current_site
+
 
 from api import serializers
 from api.models import (
@@ -42,12 +38,10 @@ from api.models import (
     ProjectFile,
     SampleSmallVariantData,
     SampleSmallVariant,
-    ProjectSummary,
     ProjectQCSummary,
-    ProjectTask,
     Sample,
     ProjectSample,
-    SampleReferenceGenome
+    SampleReferenceGenome,
 )
 from api.permissions import IsOwnerOrDoesNotExist, OnlyAdminToList
 
@@ -59,7 +53,6 @@ from common.utils import (
 )
 from .helpers.project_helpers import (
     get_project_dir,
-    remove_project_data_and_snvs,
     add_sample_to_project,
     get_primary_sample,
 )
@@ -94,7 +87,7 @@ class UserViewSet(
     queryset = USER.objects.all()
 
 
-class UserAuthViewSet(viewsets.ViewSet):
+class UserAuthViewSet(viewsets.ModelViewSet):
     """
     Viewset for managing authenticated user operations.
 
@@ -192,7 +185,7 @@ class UserAuthViewSet(viewsets.ViewSet):
         return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
 
     @action(detail=False, methods=["get"])
-    def verify_email_token(self, request, uidb64=None, token=None):
+    def verify_email_token(self, request, uidb64, token):
         """
         Verify a user's email address using a secure token.
 
@@ -211,20 +204,45 @@ class UserAuthViewSet(viewsets.ViewSet):
         """
         try:
             uid = force_str(urlsafe_base64_decode(uidb64))
-            user = get_user_model().objects.get(pk=uid)
-        except (TypeError, ValueError, OverflowError, get_user_model().DoesNotExist):
-            user = None
+            user = USER.objects.get(pk=uid)
 
-        if user is not None and email_verification_token.check_token(user, token):
-            user.is_email_verified = True
-            user.save()
-            return Response(
-                {"detail": "Email verified successfully"}, status=status.HTTP_200_OK
-            )
-        else:
-            return Response(
-                {"detail": "Invalid verification link"},
-                status=status.HTTP_400_BAD_REQUEST,
+            if email_verification_token.check_token(user, token):
+                # Email verification successful
+                user.is_email_verified = True
+                user.save()
+
+                # Render success page
+                return render(
+                    request,
+                    "emails/email_verification_result.html",
+                    {
+                        "status": "success",
+                        "title": "Email Verified Successfully!",
+                        "message": "Your email address has been verified.",
+                    },
+                )
+            else:
+                # Invalid token
+                return render(
+                    request,
+                    "emails/email_verification_result.html",
+                    {
+                        "status": "error",
+                        "title": "Verification Failed",
+                        "message": "The verification link is invalid or has expired. Please request a new verification email.",
+                    },
+                )
+
+        except (TypeError, ValueError, OverflowError, USER.DoesNotExist):
+            # Invalid user
+            return render(
+                request,
+                "emails/email_verification_result.html",
+                {
+                    "status": "error",
+                    "title": "Verification Failed",
+                    "message": "The verification link is invalid. Please request a new verification email.",
+                },
             )
 
     @action(detail=False, methods=["post"])
@@ -264,9 +282,8 @@ class UserAuthViewSet(viewsets.ViewSet):
 
             uid = urlsafe_base64_encode(force_bytes(user.pk))
             token = email_verification_token.make_token(user)
-            verification_link = reverse(
-                "verify-email", kwargs={"uidb64": uid, "token": token}
-            )
+            current_site = get_current_site(self.request).domain
+            verification_link = f"http://{current_site}{reverse('verify-email', kwargs={'uidb64': uid, 'token': token})}"
 
             # Send verification email
             send_verification_email(user, verification_link)
@@ -780,7 +797,7 @@ class FileViewSet(ProcessView, PatchView, viewsets.ViewSet):
                 (Q(user=request.user) | Q(is_demo=True)), Q(sample_type=sample_type)
             )
             files = {
-                files[i].uuid: f"{i+1} - {files[i].name}" for i in range(len(files))
+                files[i].uuid: f"{i + 1} - {files[i].name}" for i in range(len(files))
             }
             return Response(files)
 
@@ -789,7 +806,7 @@ class FileViewSet(ProcessView, PatchView, viewsets.ViewSet):
                 (Q(user=request.user) | Q(is_demo=True)), Q(file_type=file_type)
             )
             files = {
-                files[i].uuid: f"{i+1} - {files[i].name}" for i in range(len(files))
+                files[i].uuid: f"{i + 1} - {files[i].name}" for i in range(len(files))
             }
             return Response(files)
 
@@ -822,7 +839,7 @@ class FileViewSet(ProcessView, PatchView, viewsets.ViewSet):
         try:
             decoded_path = base64.b64decode(b64_string).decode("utf-8")
             file_path = convert_file_relative_path_to_absolute_path(decoded_path)
-        except Exception as e:
+        except Exception:
             return HttpResponse(status=status.HTTP_404_NOT_FOUND)
 
         if not os.path.exists(file_path):

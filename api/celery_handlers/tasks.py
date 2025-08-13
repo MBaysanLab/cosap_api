@@ -1,4 +1,3 @@
-import os
 
 from cosap_api.celery import celery_app
 
@@ -54,7 +53,11 @@ def cosap_annotation_task(variant_list: list, workdir: str, **kwargs):
 
 
 def cosap_parse_vcf_task(
-    vcf_path: str, caller_type: str, sample_name: str, sample_id: int = None, reference_genome: str = "hg38"
+    vcf_path: str,
+    caller_type: str,
+    sample_name: str,
+    sample_id: int = None,
+    reference_genome: str = "hg38",
 ):
     """
     Sends vcf path to cosap worker and retrieve parsed vcf as dict.

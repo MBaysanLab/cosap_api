@@ -2,18 +2,19 @@ import os
 
 import warnings
 
-from celery.result import AsyncResult
 from django.db.models import Q
 
-from ..constants import CosapDnaTaskInputs, ProjectAlgorithmKeys, ProjectTypes, ProjectTypes
+from ..constants import (
+    CosapDnaTaskInputs,
+    ProjectAlgorithmKeys,
+    ProjectTypes,
+)
 from ..models import (
     Project,
     ProjectFile,
     SampleSmallVariantData,
     SampleSmallVariant,
     ProjectSummary,
-    ProjectTask,
-    VariantAnnotation,
     Sample,
     ProjectSample,
 )
@@ -48,16 +49,17 @@ def get_project_dir(project_id):
         raise Exception("Project does not exist.")
     return os.path.join(get_user_dir(project.user), f"{project.id}_{project.name}")
 
+
 def get_primary_sample(project):
     """
     Get the primary sample for analysis based on project type.
-    
+
     Args:
         project: Project instance
-        
+
     Returns:
         Sample instance or None if not found
-        
+
     Raises:
         ProjectSample.DoesNotExist: If no ProjectSample exists for the project
     """
@@ -65,17 +67,17 @@ def get_primary_sample(project):
         project_samples = ProjectSample.objects.get(project=project)
     except ProjectSample.DoesNotExist:
         raise
-    
+
     if project.project_type == ProjectTypes.GERMLINE.value:
         sample = project_samples.samples.first()
         if not sample:
             return None
-    
+
     elif project.project_type == ProjectTypes.SOMATIC.value:
         sample = project_samples.samples.filter(sample_type=Sample.TUMOR).first()
         if not sample:
             return None
-    
+
     elif project.project_type == ProjectTypes.GERMLINE_TRIO.value:
         # Get the proband (child) sample that has mother or father relationships
         sample = project_samples.samples.filter(
@@ -83,11 +85,12 @@ def get_primary_sample(project):
         ).first()
         if not sample:
             return None
-    
+
     else:
         return None
-    
+
     return sample
+
 
 def update_project_variant_stats(project_id):
     """
@@ -96,27 +99,32 @@ def update_project_variant_stats(project_id):
 
     project_summary = get_or_create_project_summary(project_id)
     project = Project.objects.get(id=project_id)
-    project_snvs = SampleSmallVariant.objects.get(project=project)
+    project_samples = ProjectSample.objects.get(project=project)
 
-    snvs = project_snvs.snvs.all()
+    number_of_significant_variants = 0
+    number_of_vus = 0
+    number_of_total_variants = 0
+    for sample in project_samples.samples.all():
+        sample_snvs = SampleSmallVariant.objects.get(sample=sample).variants.all()
+        significant_snvs = sample_snvs.filter(
+            Q(intervar_classification__icontains="strong")
+            | Q(intervar_classification__icontains="potential")
+            | Q(intervar_classification__icontains="pathogenic")
+            | Q(cancervar_classification__icontains="strong")
+            | Q(cancervar_classification__icontains="potential")
+            | Q(cancervar_classification__icontains="pathogenic")
+        )
+        uncertain_snvs = sample_snvs.filter(
+            Q(intervar_classification__icontains="uncertain")
+            | Q(cancervar_classification__icontains="uncertain")
+        )
+        number_of_significant_variants += significant_snvs.count()
+        number_of_vus += uncertain_snvs.count()
+        number_of_total_variants += sample_snvs.count()
 
-    # Check if SNV's classification field contains "strong", "potential" or "pathogenic" and calculate the number of them.
-    significant_snvs = snvs.filter(
-        Q(intervar_classification__icontains="strong")
-        | Q(intervar_classification__icontains="potential")
-        | Q(intervar_classification__icontains="pathogenic")
-        | Q(cancervar_classification__icontains="strong")
-        | Q(cancervar_classification__icontains="potential")
-        | Q(cancervar_classification__icontains="pathogenic")
-    )
-    uncertain_snvs = snvs.filter(
-        Q(intervar_classification__icontains="uncertain")
-        | Q(cancervar_classification__icontains="uncertain")
-    )
-
-    project_summary.number_of_significant_variants = len(significant_snvs)
-    project_summary.number_of_vus = len(uncertain_snvs)
-    project_summary.number_of_variants = len(snvs)
+    project_summary.number_of_significant_variants = number_of_significant_variants
+    project_summary.number_of_vus = number_of_vus
+    project_summary.number_of_variants = number_of_total_variants
 
     project_summary.save()
 
@@ -137,18 +145,17 @@ def get_project_samples(project_id, sample_type=None):
         samples = list(project_samples.samples.filter(sample_type=sample_type))
     else:
         samples = list(project_samples.samples.all())
-    
+
     return samples
 
 
 def get_project_files(project_id, file_type=None):
-
     project = Project.objects.get(id=project_id)
     try:
         project_file_obj = ProjectFile.objects.get(project=project)
     except ProjectFile.DoesNotExist:
         return None
-    
+
     try:
         if file_type:
             files = list(project_file_obj.files.filter(file_type=file_type))
@@ -224,7 +231,7 @@ def update_project_summary(project_id, qc_results=None, msi_score=None):
     project_summary = get_or_create_project_summary(project_id)
 
     if qc_results:
-        project_summary.mapped_reads = qc_results["percentage_aligned"]
+        project_summary.mapped_reads = qc_results["mapped_reads_percent"]
         project_summary.mean_coverage = qc_results["mean_coverage"]
 
     project_summary.msi_score = msi_score
