@@ -31,14 +31,6 @@ jobs:
           echo 'Code pull completed successfully'
         "
         
-    - name: Fix database permissions
-      run: |
-        ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "
-          sudo mkdir -p /home/mae/cosap_db_data &&
-          sudo chown -R 999:999 /home/mae/cosap_db_data &&
-          sudo chmod -R 755 /home/mae/cosap_db_data
-        "
-        
     - name: Backup current deployment
       run: |
         ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "

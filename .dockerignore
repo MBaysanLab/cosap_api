@@ -29,4 +29,5 @@ runtime.txt
 .env.development.local
 .env.test.local
 .env.production.local
-.data/*
+data/
+filepond_temp_files/
