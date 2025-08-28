@@ -38,4 +38,12 @@ COPY . /webapi/
 
 # Create a non-root user for security
 RUN useradd -m -u 1000 cosap && chown -R cosap:cosap /webapi
+
+# Ensure PATH is set for the cosap user
+RUN echo 'export PATH="/app/miniconda/bin:${PATH}"' >> /home/cosap/.bashrc
+RUN echo 'source ~/.bashrc' >> /home/cosap/.bash_profile
+
 USER cosap
+
+# Ensure conda environment is activated
+RUN echo 'source ~/.bashrc' >> ~/.profile
