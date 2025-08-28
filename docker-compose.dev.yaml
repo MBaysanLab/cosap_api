@@ -30,7 +30,9 @@ services:
     command: bash -c "chown -R postgres:postgres /var/lib/postgresql/data && docker-entrypoint.sh postgres"
 
   web:
-    build: ./docker
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile
     command:
       [
         "bash",
@@ -51,7 +53,9 @@ services:
     restart: unless-stopped
 
   celeryworker:
-    build: ./docker
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile
     command: celery -A cosap_api worker -l INFO
     volumes:
       - ${COSAP_MEDIA_ROOT}:/user_files

@@ -53,6 +53,7 @@ if not DEBUG:
     SESSION_COOKIE_SAMESITE = "Lax"
     CSRF_COOKIE_SAMESITE = "Lax"
 
+
 ALLOWED_HOSTS = ["localhost", "web"] + json.loads(
     os.environ.get("COSAP_BIO_HOST", "[]")
 )
@@ -81,7 +82,7 @@ CORS_ALLOW_CREDENTIALS = True
 
 # Application definition
 INSTALLED_APPS = [
-    "api.apps.ApiConfig",
+    "jazzmin",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -96,6 +97,7 @@ INSTALLED_APPS = [
     "django_json_widget",
     "django_elasticsearch_dsl",
     "django_prometheus",
+    "api.apps.ApiConfig",
 ]
 
 MIDDLEWARE = [
@@ -224,7 +226,7 @@ DJANGO_DRF_FILEPOND_FILE_STORE_PATH = BASE_DIR
 # https://docs.djangoproject.com/en/4.0/howto/static-files/
 
 STATIC_URL = "static/"
-STATIC_ROOT = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.0/ref/settings/#default-auto-field
@@ -282,12 +284,6 @@ LOGGING = {
             "class": "logging.StreamHandler",
             "level": "INFO",
         },
-        # Remove file handler for production
-        # "file": {
-        #     "level": "DEBUG",
-        #     "class": "logging.FileHandler",
-        #     "filename": "log.django",
-        # },
     },
     "root": {
         "handlers": ["console"],  # Only console in production
@@ -315,7 +311,7 @@ EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "True") == "True"
 EMAIL_USE_SSL = os.environ.get("EMAIL_USE_SSL", "False") == "True"
 EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
-DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "noreply@yourdomain.com")
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "noreply@cosap.bio")
 SUPPORT_EMAIL = os.environ.get("SUPPORT_EMAIL", "support@cosap.bio")
 SERVER_EMAIL = os.environ.get("SERVER_EMAIL", DEFAULT_FROM_EMAIL)
 
