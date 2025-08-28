@@ -17,3 +17,4 @@ legacy-cgi
 django-prometheus
 prometheus-client
 gunicorn
+django-redis
