@@ -11,7 +11,7 @@ from django.contrib.auth import get_user_model
 from django.db.models import Q
 from django.db.models.query import QuerySet
 from django.forms.models import model_to_dict
-from django.http import Http404, HttpResponse, StreamingHttpResponse
+from django.http import Http404, HttpResponse, StreamingHttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.core.paginator import Paginator
 from django_drf_filepond.parsers import UploadChunkParser
@@ -27,7 +27,8 @@ from rest_framework.response import Response
 from django.utils.http import urlsafe_base64_decode
 from django.utils.encoding import force_str
 from django.contrib.sites.shortcuts import get_current_site
-
+from django.views.decorators.csrf import csrf_exempt
+from django.utils import timezone
 
 from api import serializers
 from api.models import (
@@ -881,3 +882,11 @@ class FileViewSet(ProcessView, PatchView, viewsets.ViewSet):
 
     def patch(self, request, *args, **kwargs):
         return super().patch(request, *args, **kwargs)
+
+
+@csrf_exempt
+def health_check(request):
+    return JsonResponse({
+        'status': 'healthy',
+        'timestamp': timezone.now().isoformat()
+    })

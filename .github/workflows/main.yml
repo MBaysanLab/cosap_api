@@ -6,19 +6,66 @@ on:
   
 jobs:
   run_pull:
-    name: run pull
+    name: Deploy to Production
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     
     steps:
-    - name: install ssh keys
-      # check this thread to understand why its needed:
-      # https://stackoverflow.com/a/70447517
+    - name: Install SSH keys
       run: |
         install -m 600 -D /dev/null ~/.ssh/id_rsa
         echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
         ssh-keyscan -H ${{ secrets.SSH_HOST }} > ~/.ssh/known_hosts
-    - name: connect and pull
-      run: ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "cd ${{ secrets.WORK_DIR }} && git checkout ${{ secrets.MAIN_BRANCH }} && git pull && exit"
-    - name: deploy
+        
+    - name: Verify SSH connection
       run: |
-        ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "cd ${{ secrets.WORK_DIR }} && docker compose up -d --build && exit"
+        ssh -o ConnectTimeout=10 ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "echo 'SSH connection successful'"
+        
+    - name: Pull latest code
+      run: |
+        ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "
+          cd ${{ secrets.WORK_DIR }} && 
+          git fetch origin &&
+          git checkout ${{ secrets.MAIN_BRANCH }} && 
+          git pull origin ${{ secrets.MAIN_BRANCH }} &&
+          echo 'Code pull completed successfully'
+        "
+        
+    - name: Backup current deployment
+      run: |
+        ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "
+          cd ${{ secrets.WORK_DIR }} && 
+          docker compose -f docker-compose.prod.yaml ps > deployment_backup_$(date +%Y%m%d_%H%M%S).log
+        "
+        
+    - name: Deploy with production config
+      run: |
+        ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "
+          cd ${{ secrets.WORK_DIR }} && 
+          docker compose -f docker-compose.prod.yaml down &&
+          docker compose -f docker-compose.prod.yaml build &&
+          docker compose -f docker-compose.prod.yaml up -d &&
+          echo 'Deployment completed'
+        "
+        
+    - name: Verify deployment
+      run: |
+        ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "
+          cd ${{ secrets.WORK_DIR }} && 
+          sleep 30 &&
+          docker compose -f docker-compose.prod.yaml ps &&
+          docker compose -f docker-compose.prod.yaml logs --tail=50 web
+        "
+        
+    - name: Health check
+      run: |
+        ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "
+          curl -f http://localhost:8000/health/ || exit 1
+        "
+      continue-on-error: true
+        
+    - name: Cleanup SSH keys
+      if: always()
+      run: |
+        rm -f ~/.ssh/id_rsa
+        rm -f ~/.ssh/known_hosts
