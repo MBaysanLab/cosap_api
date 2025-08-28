@@ -40,6 +40,7 @@ services:
       ]
     volumes:
       - ${COSAP_MEDIA_ROOT}:/user_files
+      - static_volume:/webapi/staticfiles
     ports:
       - "8000:8000"
     env_file:
@@ -210,3 +211,9 @@ volumes:
   elasticsearchdata:
   prometheus_data:
   grafana_data:
+  static_volume:
+    driver: local
+    driver_opts:
+      type: none
+      device: ./static
+      o: bind
