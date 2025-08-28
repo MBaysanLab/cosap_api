@@ -26,8 +26,8 @@ jobs:
         ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "
           cd ${{ secrets.WORK_DIR }} && 
           git fetch origin &&
-          git checkout ${{ secrets.MAIN_BRANCH }} && 
-          git pull origin ${{ secrets.MAIN_BRANCH }} &&
+          git checkout ${{ vars.DEPLOY_BRANCH }} && 
+          git pull origin ${{ vars.DEPLOY_BRANCH }} &&
           echo 'Code pull completed successfully'
         "
         
