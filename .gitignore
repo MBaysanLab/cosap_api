@@ -181,6 +181,7 @@ log.django
 
 # filepond files
 filepond_temp_files/
+staticfiles/
 static/
 
 .DS_Store
