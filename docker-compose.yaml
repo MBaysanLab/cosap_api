@@ -30,17 +30,18 @@ services:
     command: bash -c "chown -R postgres:postgres /var/lib/postgresql/data && docker-entrypoint.sh postgres"
 
   web:
-    build: ./docker
+    build: 
+      context: .
+      dockerfile: ./docker/Dockerfile
     command:
       [
         "bash",
         "-l",
         "-c",
-        "python -u manage.py wait_for_db && python manage.py runserver 0:8000",
+        "python -u manage.py wait_for_db && python manage.py collectstatic --noinput && gunicorn cosap_api.wsgi:application --bind 0.0.0.0:8000 --workers 4 --timeout 120 --keep-alive 5 --max-requests 1000 --max-requests-jitter 50 --preload --access-logfile - --error-logfile -",
       ]
     volumes:
       - ${COSAP_MEDIA_ROOT}:/user_files
-      - .:/webapi
     ports:
       - "8000:8000"
     env_file:
@@ -51,11 +52,12 @@ services:
     restart: unless-stopped
 
   celeryworker:
-    build: ./docker
+    build: 
+      context: .
+      dockerfile: ./docker/Dockerfile
     command: celery -A cosap_api worker -l INFO
     volumes:
       - ${COSAP_MEDIA_ROOT}:/user_files
-      - .:/webapi
     env_file:
       - .env
     depends_on:

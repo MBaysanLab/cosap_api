@@ -31,15 +31,43 @@ SECRET_KEY = os.environ["COSAP_DJANGO_SECRET"]
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get("COSAP_DJANGO_DEBUG") == "True"
 
+# Add production security settings
+if not DEBUG:
+    # Security Headers
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = "DENY"
+    SECURE_HSTS_SECONDS = 31536000  # 1 year
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+
+    # HTTPS settings (if using HTTPS)
+    SECURE_SSL_REDIRECT = os.environ.get("SECURE_SSL_REDIRECT", "False") == "True"
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+    # Session Security
+    SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "True") == "True"
+    CSRF_COOKIE_SECURE = os.environ.get("CSRF_COOKIE_SECURE", "True") == "True"
+    SESSION_COOKIE_HTTPONLY = True
+    CSRF_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = "Lax"
+    CSRF_COOKIE_SAMESITE = "Lax"
+
 ALLOWED_HOSTS = ["localhost", "web"] + json.loads(
     os.environ.get("COSAP_BIO_HOST", "[]")
 )
 
-CSRF_TRUSTED_ORIGINS = [os.environ.get("COSAP_CORS_TRUSTED_ORIGINS")]
+# Fix CORS settings
+CSRF_TRUSTED_ORIGINS = json.loads(os.environ.get("COSAP_CORS_TRUSTED_ORIGINS", "[]"))
 
-CORS_ALLOWED_ORIGINS = [
-    os.environ.get("COSAP_CORS_ALLOWED_ORIGINS", "http://localhost:3000")
-]
+CORS_ALLOWED_ORIGINS = json.loads(
+    os.environ.get("COSAP_CORS_ALLOWED_ORIGINS", '["http://localhost:3000"]')
+)
+
+# Don't allow all credentials in production
+CORS_ALLOW_CREDENTIALS = os.environ.get("CORS_ALLOW_CREDENTIALS", "False") == "True"
+
+# Restrict CORS headers
 CORS_ALLOW_HEADERS = [
     "authorization",
     "content-type",
@@ -104,7 +132,22 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "cosap_api.wsgi.application"
 
-SESSION_ENGINE = "django.contrib.sessions.backends.signed_cookies"
+# Add caching for production
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": "redis://redis:6379/1",
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        },
+        "KEY_PREFIX": "cosap",
+        "TIMEOUT": 300,
+    }
+}
+
+# Session cache
+SESSION_ENGINE = "django.contrib.sessions.backends.cache"
+SESSION_CACHE_ALIAS = "default"
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
@@ -127,6 +170,10 @@ DATABASES = {
         "PASSWORD": os.environ.get("COSAP_DB_PASSWORD", "postgres"),
         "HOST": "db",
         "PORT": "5432",
+        "OPTIONS": {
+            "sslmode": "prefer",  # Add SSL preference
+        },
+        "CONN_MAX_AGE": 600,  # Connection pooling
         "TEST": {
             "NAME": "cosap_test_db",
         },
@@ -185,8 +232,12 @@ STATIC_ROOT = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# Celery Configuration Options
+RABBITMQ_DEFAULT_VHOST = os.getenv("RABBITMQ_DEFAULT_VHOST", "vhost")
+RABBITMQ_DEFAULT_USER = os.getenv("RABBITMQ_DEFAULT_USER", "guest")
+RABBITMQ_DEFAULT_PASS = os.getenv("RABBITMQ_DEFAULT_PASS", "guest")
 
-CELERY_BROKER_URL = "amqp://guest:guest@rabbitmq:5672/vhost"
+CELERY_BROKER_URL = f"amqp://{RABBITMQ_DEFAULT_USER}:{RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/{RABBITMQ_DEFAULT_VHOST}"
 CELERY_RESULT_BACKEND = "redis://redis:6379/0"
 CELERY_TASK_ROUTES = {
     "parse_project_results": {
@@ -216,26 +267,12 @@ CELERY_ACCEPT_CONTENT = ["json", "msgpack", "yaml"]
 ELASTICSEARCH_DSL = {
     "default": {
         "hosts": "http://elasticsearch:9200",
-        "http_auth": ("elastic", "changeme"),
+        "http_auth": ("elastic", os.environ.get("ELASTIC_PASSWORD", "changeme")),
         "timeout": 60,
+        "verify_certs": False,
+        "connection_class": "elasticsearch.connection.http_urllib3.Urllib3HttpConnection",
     },
 }
-
-
-# sentry_sdk.init(
-#     dsn=os.environ.get("SENTRY_DSN"),
-#     integrations=[
-#         DjangoIntegration(),
-#     ],
-#     # Set traces_sample_rate to 1.0 to capture 100%
-#     # of transactions for performance monitoring.
-#     # We recommend adjusting this value in production.
-#     traces_sample_rate=1.0,
-#     # If you wish to associate users to errors (assuming you are using
-#     # django.contrib.auth) you may enable sending PII data.
-#     send_default_pii=True,
-# )
-# ignore_logger("django.security.DisallowedHost")
 
 
 LOGGING = {
@@ -244,22 +281,28 @@ LOGGING = {
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
-            "level": "INFO",  # Add this
+            "level": "INFO",
         },
-        "file": {
-            "level": "DEBUG",
-            "class": "logging.FileHandler",
-            "filename": "log.django",
-        },
+        # Remove file handler for production
+        # "file": {
+        #     "level": "DEBUG",
+        #     "class": "logging.FileHandler",
+        #     "filename": "log.django",
+        # },
     },
-    "root": {  # Add this section
-        "handlers": ["console", "file"],
-        "level": os.getenv("DJANGO_LOG_LEVEL", "INFO"),
+    "root": {
+        "handlers": ["console"],  # Only console in production
+        "level": os.getenv("DJANGO_LOG_LEVEL", "WARNING"),  # Higher log level
     },
     "loggers": {
         "django": {
-            "handlers": ["console", "file"],
-            "level": os.getenv("DJANGO_LOG_LEVEL", "INFO"),
+            "handlers": ["console"],
+            "level": os.getenv("DJANGO_LOG_LEVEL", "WARNING"),
+        },
+        "gunicorn": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
         },
     },
 }

@@ -1,7 +1,6 @@
 import os
 
 
-
 def wait_file_update_complete(file_path: str, timeout: int = 1000) -> bool:
     """
     Waits for file update to complete by detecting when file

@@ -1,4 +1,3 @@
-
 from cosap_api.celery import celery_app
 
 from ..constants import COSAPTasks
