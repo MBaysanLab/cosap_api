@@ -31,20 +31,28 @@ jobs:
           echo 'Code pull completed successfully'
         "
         
+    - name: Fix database permissions
+      run: |
+        ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "
+          sudo mkdir -p /home/mae/cosap_db_data &&
+          sudo chown -R 999:999 /home/mae/cosap_db_data &&
+          sudo chmod -R 755 /home/mae/cosap_db_data
+        "
+        
     - name: Backup current deployment
       run: |
         ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "
           cd ${{ secrets.WORK_DIR }} && 
-          docker compose -f docker-compose.yaml ps > deployment_backup_$(date +%Y%m%d_%H%M%S).log
+          docker compose -f docker-compose.prod.yaml ps > deployment_backup_$(date +%Y%m%d_%H%M%S).log
         "
         
     - name: Deploy with production config
       run: |
         ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "
           cd ${{ secrets.WORK_DIR }} && 
-          docker compose -f docker-compose.yaml down &&
-          docker compose -f docker-compose.yaml build &&
-          docker compose -f docker-compose.yaml up -d &&
+          docker compose -f docker-compose.prod.yaml down &&
+          docker compose -f docker-compose.prod.yaml build &&
+          docker compose -f docker-compose.prod.yaml up -d &&
           echo 'Deployment completed'
         "
         
@@ -53,8 +61,8 @@ jobs:
         ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "
           cd ${{ secrets.WORK_DIR }} && 
           sleep 30 &&
-          docker compose -f docker-compose.z.yaml ps &&
-          docker compose -f docker-compose.yaml logs --tail=50 web
+          docker compose -f docker-compose.prod.yaml ps &&
+          docker compose -f docker-compose.prod.yaml logs --tail=50 web
         "
         
     - name: Health check
