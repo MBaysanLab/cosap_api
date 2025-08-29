@@ -17,6 +17,7 @@ from ..models import (
     ProjectSummary,
     Sample,
     ProjectSample,
+    VariantAnnotation
 )
 from .file_helpers import wait_file_update_complete
 from .user_helpers import get_user_dir
@@ -106,7 +107,10 @@ def update_project_variant_stats(project_id):
     number_of_total_variants = 0
     for sample in project_samples.samples.all():
         sample_snvs = SampleSmallVariant.objects.get(sample=sample).variants.all()
-        significant_snvs = sample_snvs.filter(
+        snv_variant_annotations = VariantAnnotation.objects.filter(
+            variant__in=sample_snvs
+        )
+        significant_snvs = snv_variant_annotations.filter(
             Q(intervar_classification__icontains="strong")
             | Q(intervar_classification__icontains="potential")
             | Q(intervar_classification__icontains="pathogenic")
@@ -114,7 +118,7 @@ def update_project_variant_stats(project_id):
             | Q(cancervar_classification__icontains="potential")
             | Q(cancervar_classification__icontains="pathogenic")
         )
-        uncertain_snvs = sample_snvs.filter(
+        uncertain_snvs = snv_variant_annotations.filter(
             Q(intervar_classification__icontains="uncertain")
             | Q(cancervar_classification__icontains="uncertain")
         )
