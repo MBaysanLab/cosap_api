@@ -69,6 +69,8 @@ services:
       - prometheus
       - redis
     restart: unless-stopped
+    networks:
+      - mailnet
 
   celeryworker:
     build: 
@@ -237,3 +239,7 @@ volumes:
       type: none
       device: ${COSAP_STATIC_ROOT}
       o: bind
+
+networks:
+  mailnet:
+    external: true
