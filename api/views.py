@@ -374,10 +374,8 @@ class RegisterViewSet(mixins.CreateModelMixin, viewsets.GenericViewSet):
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
 
-        user = USER.objects.get(id=serializer.instance.id)
-        token = Token.objects.get(user=user)
 
-        return Response({"token": token.key})
+        return Response(status=status.HTTP_201_CREATED)
 
 
 class ProjectViewSet(viewsets.ModelViewSet):

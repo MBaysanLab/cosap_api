@@ -5,6 +5,7 @@ services:
     command: >
       sh -c "
         chown -R 1000:1000 /user_files &&
+        sudo chown -R 999:999 ${COSAP_DB_DATA} &&
         chmod -R 755 /user_files &&
         mkdir -p /static_host &&
         chmod 755 /static_host &&
@@ -71,6 +72,7 @@ services:
     restart: unless-stopped
     networks:
       - mailnet
+      - default
 
   celeryworker:
     build: 
