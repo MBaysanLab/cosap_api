@@ -21,8 +21,4 @@ RUN uv pip install --system -r requirements.txt
 # Copy application code
 COPY . .
 
-# Create non-root user
-RUN useradd -m -u 1000 cosap && chown -R cosap:cosap /webapi
-USER cosap
-
 EXPOSE 8000
