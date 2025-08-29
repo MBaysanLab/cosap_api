@@ -33,6 +33,9 @@ def submit_cosap_dna_task(project_id: int):
     """
     Takes a Project object and submits a COSAP DNA pipeline job to Celery.
     """
+
+    submitted = False
+
     project_type = get_project_type(project_id)
     logger.info(f"Submitting COSAP DNA task for project {project_id}")
     # Validate and get sample data based on project type
@@ -58,6 +61,7 @@ def submit_cosap_dna_task(project_id: int):
                 sample_id=sample_id,
                 reference_genome=reference_genome,
             )
+            submitted = True
             set_project_status(project_id, ProjectStatus.RUNNING.value)
 
         elif sample_data[sample_id]["file_type"] == FileExtensions.FASTQ.name:
@@ -95,10 +99,15 @@ def submit_cosap_dna_task(project_id: int):
             submit_dna_tasks(project_id, project_type, task_inputs)
             set_project_status(project_id, ProjectStatus.RUNNING.value)
         else:
-            logger.error(f"No valid FASTQ pairs found for project {project_id}")
-            logger.error(f"The sample data is: {sample_data}")
-            set_project_stderr(project_id, "No valid FASTQ pairs found.")
-            set_project_status(project_id, ProjectStatus.FAILED.value)
+            if not submitted:
+                logger.error(
+                    f"No valid FASTQ pairs or VCF files found for project {project_id}"
+                )
+                logger.error(f"The sample data is: {sample_data}")
+                set_project_stderr(
+                    project_id, "No valid FASTQ pairs or VCF files found"
+                )
+                set_project_status(project_id, ProjectStatus.FAILED.value)
 
 
 def get_sample_files(project_id: int):
