@@ -58,14 +58,11 @@ ALLOWED_HOSTS = ["localhost", "web"] + json.loads(
     os.environ.get("COSAP_BIO_HOST", "[]")
 )
 
-CSRF_TRUSTED_ORIGINS = [os.environ.get("COSAP_CORS_TRUSTED_ORIGINS")]
+CSRF_TRUSTED_ORIGINS = [os.environ.get("COSAP_CSRF_TRUSTED_ORIGINS")]
 
 CORS_ALLOWED_ORIGINS = [
     os.environ.get("COSAP_CORS_ALLOWED_ORIGINS", "http://localhost:3000")
 ]
-
-# Don't allow all credentials in production
-CORS_ALLOW_CREDENTIALS = os.environ.get("CORS_ALLOW_CREDENTIALS", "False") == "True"
 
 # Restrict CORS headers
 CORS_ALLOW_HEADERS = [
