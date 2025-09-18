@@ -70,7 +70,8 @@ def filter_variants_by_annotation(
         search = VariantAnnotationDocument.search()
 
         if subset_ids:
-            search = search.filter("terms", _id=subset_ids)
+            # ES8 prefers 'ids' query for _id filtering
+            search = search.filter("ids", values=subset_ids)
 
         for filter_item in filters:
             # Validate filter format
@@ -98,6 +99,10 @@ def filter_variants_by_annotation(
             )
             query_field = field_info["query_field"]
             query_type = field_info["query_type"]
+
+            # Ensure term queries use keyword fields for ES8 compatibility
+            if query_type == "term":
+                query_field = f"{query_field}.keyword"
 
             # Handle range queries for gnomad_af
             if query_type == "range":

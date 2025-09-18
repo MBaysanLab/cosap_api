@@ -247,7 +247,6 @@ ELASTICSEARCH_DSL = {
         "http_auth": ("elastic", os.environ.get("ELASTIC_PASSWORD", "changeme")),
         "timeout": 60,
         "verify_certs": False,
-        "connection_class": "elasticsearch.connection.http_urllib3.Urllib3HttpConnection",
     },
 }
 
